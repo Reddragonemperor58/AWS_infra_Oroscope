@@ -1,16 +1,3 @@
-# Variables
-variable "project_name" {
-  type        = string
-  description = "The name of the project (e.g., oroscope)"
-  default     = "oroscope"
-}
-
-variable "vpc_cidr" {
-  type        = string
-  description = "CIDR block for the VPC"
-  default     = "10.0.0.0/16"
-}
-
 # VPC
 resource "aws_vpc" "main" {
   cidr_block = var.vpc_cidr
