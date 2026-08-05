@@ -14,7 +14,7 @@ resource "aws_rds_cluster" "aurora_db" {
   serverlessv2_scaling_configuration {
     max_capacity             = 2.0
     min_capacity             = 0.0
-    seconds_until_auto_pause = 3600
+    seconds_until_auto_pause = 300
   }
 
   tags = merge(local.common_tags, { Name = "${local.name_prefix}-aurora-cluster" })

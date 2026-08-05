@@ -1,4 +1,25 @@
+# Terraform
 .terraform/
 *.tfstate
-*.tfstate.backup
-.terraform.lock.hcl
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Python / Alembic / FastAPI
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Environment Variables & Secrets
+.env
+.aws/
