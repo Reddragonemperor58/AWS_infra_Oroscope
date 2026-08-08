@@ -1,37 +1,46 @@
 # Runbook
 
 ## Running a migration
+```bash
 alembic upgrade head
+```
 - Applies every migration not yet recorded in `alembic_version`, in order.
 - If `upgrade()` fails partway through, `alembic_version` only updates after success —
   a failure leaves the recorded version unchanged, and (Postgres DDL being
   transactional) any partial changes from that migration roll back automatically.
   It doesn't "revert" anything — it simply never advances past the failed step.
 
+```bash
 alembic downgrade -1
+```
 - Reverses exactly one migration, running its downgrade().
 
 ## Querying the database directly (bypassing the app)
+```bash
 aws rds-data execute-statement \
   --resource-arn "$(terraform output -raw aurora_cluster_arn)" \
   --secret-arn "$(terraform output -raw aurora_secret_arn)" \
   --database "oroscope_aurora" \
   --sql "YOUR SQL HERE" \
   --region ap-south-2
-
+```
 ## Finding a valid, current Aurora engine version
 Never hardcode one — versions get deprecated for new-cluster creation without
 warning (13.6 to a flat "not found" on 16.4 is exactly how this bit us).
+```bash
 aws rds describe-db-engine-versions --engine aurora-postgresql \
   --query "DBEngineVersions[?starts_with(EngineVersion, '17.')].EngineVersion" \
   --output table --region ap-south-2 --no-cli-pager
+```
 Ignore any version with "-limitless" — a separate Aurora product, not a version
 variant. Avoid the newest major version number too; let it mature first.
 
 ## AWS CLI pager
 Long output pages by default (space = next page, q = quit). Skip with
+```bash
 --no-cli-pager, or filter server-side with --query using JMESPath, e.g.
 --query "DBEngineVersions[?starts_with(EngineVersion,'17.')]".
+```
 
 ## Working across two machines
 - .terraform/, provider binaries, and *.tfstate never travel with git — regenerated
