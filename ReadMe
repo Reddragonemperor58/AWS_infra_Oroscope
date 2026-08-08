@@ -22,6 +22,7 @@ system state.
 | 5 — Frontend (React, static, S3 + CloudFront) | Not started |
 | 6 — CI/CD | Not started |
 | 7 — Observability, cost guardrails, security hardening | Not started |
+
 ## Stack at a glance
 
 - **IaC:** Terraform, S3 + native locking remote backend (see ADR 0001)
