@@ -35,6 +35,9 @@
 * **Idempotent DDL:** Database schema modification scripts written so they can be run multiple times safely without throwing errors (e.g., using `CREATE TABLE IF NOT EXISTS`).
 * **Data API-Style Request:** A stateless HTTPS request that executes SQL against Aurora via IAM authentication. It is used for both DDL (schema changes) and ordinary DML operations (like `SELECT`, `INSERT`, `UPDATE`).
 * **ACU (Aurora Capacity Unit) / Scale to Zero:** The metric of compute/RAM allocation for Aurora Serverless. It scales dynamically based on traffic and can be configured to drop to 0 (pausing compute entirely) when idle to save costs.
+* **UUID:** Universally Unique Identifier.
+* **sub:** stands for Subject (a standard term defined in the OpenID Connect and JWT specifications).
+* **IDP:** Identity Provider.
 
 ### Infrastructure as Code & Billing
 * **Terraform State (`.tfstate`):** The internal tracking file where Terraform records the current real-world state of your cloud resources to compare against future code changes.

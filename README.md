@@ -16,7 +16,7 @@ system state.
 |---|---|
 | 0 — AWS account, IAM, Terraform bootstrap | Done |
 | 1 — Network + Aurora Serverless v2 + schema migrations | Done |
-| 2 — Cognito (identity) | In progress |
+| 2 — Cognito (identity) | Done |
 | 3 — Control-plane Lambda + API Gateway | Not started |
 | 4 — S3 + SQS + inference Lambda (container image) + SNS | Not started |
 | 5 — Frontend (React, static, S3 + CloudFront) | Not started |
