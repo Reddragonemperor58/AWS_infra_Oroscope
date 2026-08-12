@@ -23,3 +23,6 @@ env/
 # Environment Variables & Secrets
 .env
 .aws/
+
+# Directory structure
+directory_tree.txt
