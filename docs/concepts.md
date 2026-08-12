@@ -27,6 +27,23 @@
 * **What an Authorizer Checks:** It validates the JWT sent by the client, specifically verifying the cryptographic signature (using Cognito's public keys), the token's expiration time, and the issuer.
 * **BOLA (Broken Object Level Authorization):** A critical API vulnerability where an application correctly validates *who* a user is (authentication), but fails to check if that user actually has permission to access the specific requested record (authorization).
 * **Presigned URL:** A temporary, secure link that gives someone time-limited access to a specific AWS resource (like an S3 object) without requiring them to have AWS credentials.
+* **Access Token:** A token assigned to the User by the Cognito for api requests. Expiry time is in hours. Travels all over the network, Vulnerability is high.
+* **Refresh Token:** A token assigned to the User by the Cognito to mint new access tokens for every specified number of hours. Expiry time is usually in days or months. Only exchanges between the Cognito and User. Vulnerability is low. In this deployment,  rotated with new Refresh token by Cognito when a new access token is recieved.
+* **ID Token:** An OpenID Connect (OIDC) token issued by Cognito containing the user's identity profile (like email, unique sub, and name). Unlike the Access Token (which is sent to the backend for authorization), the ID Token is consumed exclusively by the frontend client to verify who the user is and instantly display profile data without making an extra backend API request. It is minted alongside and shares the exact same short-lived expiry time as the Access Token.
+* **Public Client vs. Confidential Client:** 
+  * **Confidential Client:** An application (like a Node.js or Django backend) running on a private server where source code and environment variables are hidden from users. It can safely store a Client Secret to prove its application identity to Cognito.
+  * **Public Client:** An application (like a React SPA or iOS app) executing directly on a user's device. Because its code can be inspected by the user, it cannot securely store a Client Secret (`generate_secret = false`).
+  * **Example Analogy (The Bank Vault):**
+    > **Confidential Client (Server):** Both keys are required simultaneously to open the box. Even if a thief steals the customer's key, they can't open the box without the Bank Manager standing next to them in the official bank building.
+    > 
+    > **Public Client (SPA):** The app is out in the open (the browser), so there is no Bank Manager present. You cannot leave the Manager's key hanging on the wall for everyone to see. So Cognito allows the vault to open with just the customer's key, but compensates by adding extra cameras and security protocols (SRP, Token Rotation, PKCE).
+* **SRP (Secure Remote Password):** A zero-knowledge proof cryptographic protocol. It allows a client (React) to prove to a server (Cognito) that it knows a password by doing complex math locally, guaranteeing the plaintext password is never sent over the internet.
+* **PKCE (Proof Key for Code Exchange):** An optional OAuth 2.0 security extension that dynamically generates a temporary cryptographic secret for every individual authorization request. It protects Public Clients against authorization code interception attacks without requiring a static Client Secret. Its been modified to mandatory in OAuth 2.1.
+* **User Pool:** The overarching identity directory and database. It stores the actual human users, their attributes (emails, UUIDs), their hashed passwords, and global security policies (like password strength). By itself, it cannot process logins.
+* **User Pool Client (App Client):** The specific configuration "doorway" that allows a software application to interact with a User Pool. A single User Pool can have multiple App Clients (e.g., one for a Web SPA, one for a Mobile App, one for a Backend Server), each with its own specific security rules, token expirations, and Client ID.
+* **Client ID:** The unique public identifier for a specific User Pool Client. It tells Cognito which "door" an authentication request is trying to use.
+* **URI vs. URL:** A URI (Uniform Resource Identifier) is a string of characters that identifies a resource either by its location, its name, or both. A URL (Uniform Resource Locator) is a specific type of URI that tells you exactly *where* a resource is on the internet and *how* to get there (e.g., starting with `https://`). **All URLs are URIs, but not all URIs are URLs.**
+* **Redirect URI (Callback URI):** The exact, pre-registered destination where an Identity Provider (like Cognito) sends a user (and their tokens) after a successful login. OAuth uses the broader term "URI" rather than "URL" because this destination isn't always a web address; it must also support custom deep links for mobile apps (e.g., `oroscope-mobile://auth-callback`) which do not point to an internet location. In Cognito, this acts as a strict security whitelist to ensure tokens cannot be hijacked and sent to malicious phishing domains.
 
 ### Database & Application Concepts
 * **Transactions:** A binary database operation (all-or-nothing). No partial execution is allowed.
@@ -38,6 +55,7 @@
 * **UUID:** Universally Unique Identifier.
 * **sub:** stands for Subject (a standard term defined in the OpenID Connect and JWT specifications).
 * **IDP:** Identity Provider.
+* **SPA (Single Page Application):** A web application (like React) that downloads entirely to the user's browser on the first load, rather than relying on a server to render and send new HTML pages for every click.
 
 ### Infrastructure as Code & Billing
 * **Terraform State (`.tfstate`):** The internal tracking file where Terraform records the current real-world state of your cloud resources to compare against future code changes.

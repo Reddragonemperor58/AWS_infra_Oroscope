@@ -52,6 +52,17 @@ resource "aws_cognito_user_pool_client" "userpool_client" {
 
   prevent_user_existence_errors = "ENABLED"
 
+  # Explicitly declare token validities rather than trusting defaults
+  access_token_validity  = 60
+  id_token_validity      = 60
+  refresh_token_validity = 30
+
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "days"
+  }
+
   # Fix 2: Allow standard secure browser login (SRP) and token refreshes
   explicit_auth_flows = [
     "ALLOW_USER_SRP_AUTH"
