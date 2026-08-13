@@ -1,0 +1,32 @@
+[
+  {
+    "provisional_diagnosis": "PLACEHOLDER - Diagnosis A",
+    "image_analysis": "variable diagnosis",
+    "score": 1
+  },
+  {
+    "provisional_diagnosis": "PLACEHOLDER - Diagnosis A",
+    "image_analysis": "borderline",
+    "score": 3
+  },
+  {
+    "provisional_diagnosis": "PLACEHOLDER - Diagnosis A",
+    "image_analysis": "suggestive of dysplasia",
+    "score": 5
+  },
+  {
+    "provisional_diagnosis": "PLACEHOLDER - Diagnosis B",
+    "image_analysis": "variable diagnosis",
+    "score": 2
+  },
+  {
+    "provisional_diagnosis": "PLACEHOLDER - Diagnosis B",
+    "image_analysis": "borderline",
+    "score": 4
+  },
+  {
+    "provisional_diagnosis": "PLACEHOLDER - Diagnosis B",
+    "image_analysis": "suggestive of dysplasia",
+    "score": 5
+  }
+]
