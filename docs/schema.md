@@ -22,9 +22,9 @@
 - `patient_id` (String 36, FK -> Patients.id, Not Null)
 - `doctor_id` (String 36, FK -> Users.id, Not Null) - Denormalized for dashboard query speed
 - `mucosal_type` (String 100, Nullable)
-- `has_ulcer` (Boolean, Nullable) - TENTATIVE: verify if rule engine needs categorical string (e.g., "Traumatic") instead of boolean.
-- `has_patch` (Boolean, Nullable) - TENTATIVE: see above.
-- `has_growth` (Boolean, Nullable) - TENTATIVE: see above.
+- `ulcer` (String 255, Nullable) - Renamed from `has_ulcer`; categorical string (e.g., "Round Ulcer")
+- `patch` (String 255, Nullable) - Renamed from `has_patch`; categorical string
+- `growth` (String 255, Nullable) - Renamed from `has_growth`; categorical string
 - `symptoms` (JSONB, Nullable)
 - `habits` (JSONB, Nullable)
 - `dl_image_s3_key` (String 255, Nullable)
