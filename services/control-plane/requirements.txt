@@ -1,0 +1,6 @@
+fastapi
+pydantic
+mangum
+sqlalchemy
+sqlalchemy-aurora-data-api
+boto3

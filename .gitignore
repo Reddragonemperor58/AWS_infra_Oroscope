@@ -25,4 +25,5 @@ env/
 .aws/
 
 # Directory structure
-directory_tree.txt
+directory_tree.txtservices/control-plane/package/
+services/control-plane/fastapi_backend.zip

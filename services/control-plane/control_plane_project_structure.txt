@@ -1,0 +1,30 @@
+.
+├── app
+│   ├── data
+│   │   ├── clinical_rules.json
+│   │   └── scoring_rules.json
+│   ├── database.py
+│   ├── dependencies.py
+│   ├── __init__.py
+│   ├── main.py
+│   ├── models.py
+│   ├── __pycache__
+│   │   ├── database.cpython-314.pyc
+│   │   ├── dependencies.cpython-314.pyc
+│   │   ├── __init__.cpython-314.pyc
+│   │   ├── main.cpython-314.pyc
+│   │   ├── models.cpython-314.pyc
+│   │   └── rules_engine.cpython-314.pyc
+│   ├── rules_engine.py
+│   └── tests
+│       ├── __init__.py
+│       ├── __pycache__
+│       │   ├── __init__.cpython-314.pyc
+│       │   └── test_rules_engine.cpython-314-pytest-9.1.1.pyc
+│       └── test_rules_engine.py
+├── control_plane_project_structure.txt
+├── local.py
+├── requirements-dev.txt
+└── requirements.txt
+
+6 directories, 22 files

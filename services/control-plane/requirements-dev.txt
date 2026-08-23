@@ -1,0 +1,4 @@
+uvicorn
+pytest
+alembic
+psycopg2-binary

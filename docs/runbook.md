@@ -69,3 +69,19 @@ aws rds describe-db-engine-versions \
 
 ## Checking What Something Actually Cost
 Go to: **Console → Billing and Cost Management → Cost Explorer → group by Service**, filtered to the relevant date range. Don't guess — check.
+
+
+## System Validation and Data Integrity
+
+### Relational Constraints over Application Logic
+During the integration of the Control Plane, we verified that data integrity is enforced at the lowest possible level: the PostgreSQL constraints applied via Alembic.
+
+**Validation Event:**
+An attempt was made to route an HTTP `POST /patients` request through FastAPI to create a patient assigned to a `doctor_id` that did not exist in the `users` table. 
+
+**Result:**
+Instead of relying on FastAPI to catch the missing user, the request successfully traversed the `boto3` client, the AWS RDS Data API, and the Aurora cluster, where the PostgreSQL engine explicitly rejected it:
+`ERROR: insert or update on table "patients" violates foreign key constraint "patients_doctor_id_fkey"`
+
+**Architectural Value:**
+This proves that our BOLA (Broken Object Level Authorization) defenses and tenant-isolation strategies are backed by hard, database-level referential integrity. Even if an application-layer bug allows a malformed write request to pass, the database constraints are live and actively guarding against orphaned records and cross-tenant data corruption.
