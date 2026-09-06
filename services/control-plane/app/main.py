@@ -46,6 +46,12 @@ class DiagnosisResponse(BaseModel):
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
 # --- ENDPOINTS ---
 @app.post("/patients", response_model=PatientResponse)
 def create_patient(

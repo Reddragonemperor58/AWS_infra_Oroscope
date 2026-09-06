@@ -27,3 +27,6 @@ env/
 # Directory structure
 directory_tree.txtservices/control-plane/package/
 services/control-plane/fastapi_backend.zip
+
+# test-events
+services/control-plane/test-events/

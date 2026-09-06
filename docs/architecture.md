@@ -35,4 +35,42 @@ Maintained centrally via a `locals` block, so every resource references `local.n
 ## Networking
 There is currently no NAT Gateway and no Internet Gateway anywhere in this VPC. Nothing inside the VPC ever needs outbound internet access — the database only responds to inbound Data API queries (security groups are stateful; no egress rules are needed for this to work), and the Lambda that needs to reach S3 or other AWS services is kept entirely outside the VPC, so it never requires a NAT Gateway or a VPC endpoint to reach anything.
 
-Designed so the Stage 3 Lambda will query the database via the Data API without VPC attachment or a NAT Gateway.
+Confirmed: the Stage 3 Lambda queries the database via the Data API with no VPC attachment, verified via direct invoke and a live foreign-key constraint rejection (see runbook.md)."
+
+## Compute (Control Plane)
+The synchronous API layer runs as a single AWS Lambda function (`oroscope-dev-fastapi`),
+packaged as a zip deployment (not a container image — that's reserved for the
+heavier inference workload). FastAPI is wrapped with Mangum, which translates
+API Gateway's event structure into an ASGI request FastAPI understands natively.
+
+**Runtime:** Python 3.13 — the current maximum supported by Lambda. Local
+development runs Python 3.14, which required cross-compiling dependencies
+explicitly for Lambda (`manylinux2014_x86_64` wheels); see `runbook.md`.
+
+**Auth model:** No JWT decoding happens in application code. A Cognito
+authorizer (once wired via API Gateway) verifies the token's signature and
+expiry before Lambda ever runs; the application only reads the already-verified
+`sub` claim out of the event, via `request.scope["aws.event"]`.
+
+**IAM permissions (least privilege, confirmed working via direct invoke):**
+`rds-data:ExecuteStatement` and related actions scoped to the Aurora cluster's
+ARN; `secretsmanager:GetSecretValue` scoped to the cluster's auto-generated
+secret ARN. No `*` resources anywhere in this role.
+
+**Empirically confirmed via direct `aws lambda invoke`, bypassing API Gateway
+entirely:** cold start succeeds, all dependencies load correctly under the
+Lambda runtime, Mangum correctly parses a full API Gateway v2 event, and the
+auth-rejection path returns a clean 401 rather than an unhandled exception
+when authorizer claims are absent.
+
+
+## Edge (API Gateway)
+HTTP API (v2), AWS_PROXY integration to the control-plane Lambda — the entire
+raw event is handed to Mangum unmodified, no request reshaping at this layer.
+A Cognito JWT authorizer validates token signature, expiry, issuer, and
+audience before Lambda invocation; unauthenticated requests never incur
+Lambda compute cost. Authorization is applied per-route: `/health` is
+intentionally open, all patient/diagnosis routes require a valid JWT.
+
+**Known temporary gap:** CORS `allow_origins` is currently `*`, pending a
+real frontend domain — tracked in ADR 0009, must be closed before production.
