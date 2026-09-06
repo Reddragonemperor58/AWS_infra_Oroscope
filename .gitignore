@@ -30,4 +30,4 @@ services/control-plane/fastapi_backend.zip
 
 # test-events
 services/control-plane/test-events/
-test_login.pytest_login.py
+test_login.py
