@@ -25,9 +25,11 @@ env/
 .aws/
 
 # Directory structure
-directory_tree.txtservices/control-plane/package/
-services/control-plane/fastapi_backend.zip
+directory_tree.txt
 
 # test-events
 services/control-plane/test-events/
+test_login.py
 test_login.py*.xlsx
+services/control-plane/fastapi_backend.zip
+services/control-plane/app/data/clinical_rules.json

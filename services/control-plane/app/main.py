@@ -9,7 +9,7 @@ from mangum import Mangum
 from .database import get_db
 from .dependencies import get_current_user
 from .models import User, Patient, Diagnosis, DiagnosisStatus
-from .rules_engine import get_clinical_diagnosis
+from .rules_engine import get_clinical_diagnosis, get_differential_and_advise
 
 app = FastAPI(title="Oroscope Control Plane")
 
@@ -95,11 +95,13 @@ def clinical_match(
         raise HTTPException(status_code=404, detail="Patient not found")
         
     # 2. Run the isolated medical math
-    result = get_clinical_diagnosis(
-        ulcer=request.ulcer,
-        patch=request.patch,
-        growth=request.growth,
-        mucosal_condition=request.mucosal_condition
+    result = get_differential_and_advise(
+        db=db,
+        ulcer=diagnosis.ulcer, patch=diagnosis.patch, growth=diagnosis.growth,
+        mucosal_condition=diagnosis.mucosal_type, sharp_objects=diagnosis.sharp_objects,
+        pigmentation=diagnosis.pigmentation, symptoms=diagnosis.symptoms,
+        habits=diagnosis.habits, oral_mapping=diagnosis.oral_mapping,
+        provisional_diagnosis=request.provisional_diagnosis,
     )
     
     if not result:

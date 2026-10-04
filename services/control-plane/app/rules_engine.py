@@ -2,6 +2,8 @@ import json
 import os
 import logging
 from typing import Optional, Dict
+from sqlalchemy import text
+
 
 # Setup basic logging
 logger = logging.getLogger(__name__)
@@ -105,3 +107,33 @@ def calculate_final_score(provisional_diagnosis: str, deviation_score: float) ->
             return int(rule.get("score", 0))
             
     return None
+
+
+def get_differential_and_advise(db, ulcer, patch, growth, mucosal_condition,
+                                   sharp_objects, pigmentation, symptoms, habits,
+                                   oral_mapping, provisional_diagnosis):
+    """
+    Queries the clinical_rules table via the existing Data API session —
+    same database.py engine every other endpoint already uses. No local
+    file, no in-memory cache; the 592K-row table lives in Aurora.
+    """
+    result = db.execute(
+        text("""
+            SELECT differential_diagnosis, advise FROM clinical_rules
+            WHERE ulcer = :ulcer AND patch = :patch AND growth = :growth
+              AND mucosal_condition = :mucosal_condition
+              AND sharp_objects = :sharp_objects AND pigmentation = :pigmentation
+              AND symptoms = :symptoms AND habits = :habits
+              AND oral_mapping = :oral_mapping
+              AND provisional_diagnosis = :provisional_diagnosis
+        """),
+        {
+            "ulcer": ulcer, "patch": patch, "growth": growth,
+            "mucosal_condition": mucosal_condition, "sharp_objects": sharp_objects,
+            "pigmentation": pigmentation, "symptoms": symptoms, "habits": habits,
+            "oral_mapping": oral_mapping, "provisional_diagnosis": provisional_diagnosis,
+        },
+    ).first()
+    if not result:
+        return None
+    return {"differential_diagnosis": result[0], "advise": result[1]}
