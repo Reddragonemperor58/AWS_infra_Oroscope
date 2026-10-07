@@ -54,6 +54,7 @@ class DiagnosisResponse(BaseModel):
     sharp_objects: Optional[str] = None
     pigmentation: Optional[str] = None
     oral_mapping: Optional[str] = None
+    advise: Optional[str] = None
 
 @app.get("/health")
 def health_check():
@@ -150,6 +151,7 @@ def run_clinical_lookup(
         raise HTTPException(status_code=404, detail="No matching clinical rule found.")
 
     diagnosis.rules_match_result = result["differential_diagnosis"]
+    diagnosis.advise = result["advise"]
     db.commit()
     db.refresh(diagnosis)
     return diagnosis

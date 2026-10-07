@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Numeric, Enum, text
+from sqlalchemy import Column, String, Integer, Text, ForeignKey, DateTime, Numeric, Enum, text
 from sqlalchemy.dialects.postgresql import JSONB
 from .database import Base
 
@@ -46,6 +46,7 @@ class Diagnosis(Base):
     dl_image_s3_key = Column(String(255), nullable=True)
     optical_image_1_s3_key = Column(String(255), nullable=True)
     optical_image_2_s3_key = Column(String(255), nullable=True)
+    advise = Column(Text, nullable=True)
     
     # YOUR FIX: Explicitly name the type and remove creation ownership from SQLAlchemy
     status = Column(
