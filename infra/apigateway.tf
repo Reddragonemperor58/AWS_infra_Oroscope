@@ -55,7 +55,7 @@ resource "aws_apigatewayv2_route" "post_patients" {
 
 resource "aws_apigatewayv2_route" "clinical_match" {
   api_id             = aws_apigatewayv2_api.main.id
-  route_key          = "POST /diagnoses/clinical-match"
+  route_key          = "PATCH /diagnoses/{diagnosis_id}/clinical-lookup"
   target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
   authorization_type = "JWT"
   authorizer_id      = aws_apigatewayv2_authorizer.cognito.id

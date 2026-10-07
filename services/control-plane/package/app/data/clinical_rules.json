@@ -1,0 +1,20 @@
+[
+  {
+    "ulcer": "Round Ulcer",
+    "patch": "Red Patch",
+    "growth": "Round Growth",
+    "mucosal_condition": "Marble Appearance",
+    "provisional_diagnosis": "PLACEHOLDER - Diagnosis A",
+    "differential_diagnosis": "PLACEHOLDER - Diff A",
+    "advise": "PLACEHOLDER - Advise A"
+  },
+  {
+    "ulcer": "Irregular <1cm, <2 Weeks",
+    "patch": "White Patch",
+    "growth": "Irregular Growth <1cm",
+    "mucosal_condition": "No Abnormality Detected",
+    "provisional_diagnosis": "PLACEHOLDER - Diagnosis B",
+    "differential_diagnosis": "PLACEHOLDER - Diff B",
+    "advise": "PLACEHOLDER - Advise B"
+  }
+]

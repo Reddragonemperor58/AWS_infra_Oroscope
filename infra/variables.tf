@@ -17,10 +17,10 @@ variable "master_username_db" {
   default     = "krishnavamsi"
 }
 
-variable "database_name" { 
+variable "database_name" {
   type        = string
   description = "Name of the Aurora database"
-  default     = "oroscope_aurora"  
+  default     = "oroscope_aurora"
 }
 
 variable "environment" {

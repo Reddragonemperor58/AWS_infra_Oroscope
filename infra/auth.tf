@@ -27,11 +27,11 @@ resource "aws_cognito_user_pool" "user_pool" {
 
   # Fix 3: Removed password_history_size to prevent Advanced Security billing
   password_policy {
-    minimum_length    = 16
-    require_symbols   = true
-    require_lowercase = true
-    require_numbers   = true
-    require_uppercase = true
+    minimum_length        = 16
+    require_symbols       = true
+    require_lowercase     = true
+    require_numbers       = true
+    require_uppercase     = true
     password_history_size = 5
   }
 

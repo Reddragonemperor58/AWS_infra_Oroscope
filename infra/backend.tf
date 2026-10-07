@@ -5,13 +5,13 @@ terraform {
       version = "~> 6.0"
     }
   }
-  
+
   backend "s3" {
-    bucket         = "vamsi-terraform-state-20260725"
-    key            = "global/s3/terraform.tfstate"
-    region         = "ap-south-2"
-    use_lockfile   = true
-    encrypt        = true
+    bucket       = "vamsi-terraform-state-20260725"
+    key          = "global/s3/terraform.tfstate"
+    region       = "ap-south-2"
+    use_lockfile = true
+    encrypt      = true
   }
 }
 

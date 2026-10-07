@@ -1,6 +1,6 @@
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "vamsi-terraform-state-20260725" 
-  
+  bucket = "vamsi-terraform-state-20260725"
+
   lifecycle {
     prevent_destroy = true
   }
