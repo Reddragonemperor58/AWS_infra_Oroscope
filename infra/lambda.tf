@@ -24,8 +24,8 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 
 # 3. Custom Policy: Allow Lambda to talk to Aurora Data API and Secrets Manager
 resource "aws_iam_role_policy" "lambda_aurora_access" {
-  name = "${local.name_prefix}-aurora-access"
-  role = aws_iam_role.fastapi_lambda_role.id
+  name   = "${local.name_prefix}-aurora-access"
+  role   = aws_iam_role.fastapi_lambda_role.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -41,32 +41,49 @@ resource "aws_iam_role_policy" "lambda_aurora_access" {
         Resource = aws_rds_cluster.aurora_db.arn
       },
       {
-        Effect   = "Allow"
-        Action   = "secretsmanager:GetSecretValue"
+        Effect = "Allow"
+        Action = "secretsmanager:GetSecretValue"
         Resource = aws_rds_cluster.aurora_db.master_user_secret[0].secret_arn
       }
     ]
   })
 }
 
+# 3b. Custom Policy: optical images bucket (presigned uploads are signed with this role, so it
+#     needs PutObject; the analysis step needs GetObject). Scoped to this bucket's objects only.
+resource "aws_iam_role_policy" "lambda_images_access" {
+  name   = "${local.name_prefix}-images-access"
+  role   = aws_iam_role.fastapi_lambda_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:PutObject", "s3:GetObject"]
+      Resource = "${aws_s3_bucket.images.arn}/*"
+    }]
+  })
+}
+
 # 4. The actual Lambda Function
 resource "aws_lambda_function" "fastapi_backend" {
-  function_name = "${local.name_prefix}-fastapi"
-  role          = aws_iam_role.fastapi_lambda_role.arn
-
-  handler = "app.main.handler"
-  runtime = "python3.13"
-
+  function_name    = "${local.name_prefix}-fastapi"
+  role             = aws_iam_role.fastapi_lambda_role.arn
+  
+  handler          = "app.main.handler" 
+  runtime          = "python3.13"
+  
   filename         = "../services/control-plane/fastapi_backend.zip"
   source_code_hash = filebase64sha256("../services/control-plane/fastapi_backend.zip")
-
-  timeout     = 10
-  memory_size = 256
+  
+  # SSIM on two phone photos: ~4 s on 12 MP locally; more memory = more CPU in Lambda.
+  timeout          = 30
+  memory_size      = 1024
 
   environment {
     variables = {
       AURORA_CLUSTER_ARN = aws_rds_cluster.aurora_db.arn
       AURORA_SECRET_ARN  = aws_rds_cluster.aurora_db.master_user_secret[0].secret_arn
+      IMAGES_BUCKET      = aws_s3_bucket.images.bucket
     }
   }
 
