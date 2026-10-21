@@ -11,6 +11,7 @@ pip install -r requirements.txt --target package \
   --only-binary=:all: --upgrade --quiet
 rm -rf package/boto3* package/botocore* package/s3transfer* package/jmespath*
 cp -r app package/app
+rm -rf package/app/tests   # tests and local-dev files must not ship in the Lambda
 find package -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 python3 -c "import shutil; shutil.make_archive('fastapi_backend', 'zip', 'package')"

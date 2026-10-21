@@ -14,3 +14,18 @@
 **Steady-state floor once idle:** ~$0.40-something/month (Secrets Manager), plus small
 RDS blips every time the app is actively used. Everything else genuinely rounds to zero
 at this traffic volume.cf 
+
+## Stage 4a additions (optical analysis) - approximate, verify on the AWS pricing page for ap-south-2
+
+| Item | Cost driver | Estimate |
+|---|---|---|
+| S3 images bucket | Storage + requests | Fractions of a cent per GB-month; a pair of photos is ~2-10 MB. Objects expire after **30 days** (placeholder retention - confirm with the clinic) |
+| Lambda (1024 MB, 30 s timeout) | GB-seconds per invocation | ~4 s for a 12 MP pair => ~4 GB-s (~$0.0001/analysis); the monthly free tier (400,000 GB-s) covers thousands of analyses |
+| API Gateway HTTP API | Per request | Negligible at prototype volume |
+| Presigned URL generation | No separate charge | Done inside the Lambda |
+
+**Costs avoided by design:** no ECR repository, no second Lambda, no container image storage, no NAT gateway, no SageMaker endpoint (DL skipped). The memory increase from 256 MB to 1024 MB only costs money while a request runs.
+
+**Still the dominant cost:** Aurora Serverless v2. Scale-to-zero (min 0 ACU, pause after 3600 s) means an idle database costs only storage; the first request after a pause returns 503 while it resumes.
+
+**Cost risks to watch:** the future DL endpoint (a real-time SageMaker endpoint bills continuously; use Serverless Inference or a container Lambda instead), and the 6 MB / 10 MB payload limits pushing anyone toward a bigger architecture than needed.

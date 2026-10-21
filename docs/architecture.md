@@ -74,3 +74,46 @@ intentionally open, all patient/diagnosis routes require a valid JWT.
 
 **Known temporary gap:** CORS `allow_origins` is currently `*`, pending a
 real frontend domain — tracked in ADR 0009, must be closed before production.
+
+## Optical analysis flow (Stage 4a, ADR 0012)
+
+Two photos (red light, blue light) are compared with SSIM; the deviation is turned into a band, then a 0-5 score. The DL inference step is skipped in the prototype, so `provisional_diagnosis` is entered by hand.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as API Gateway (JWT)
+    participant L as Lambda (FastAPI)
+    participant S as S3 images bucket
+    participant D as Aurora (Data API)
+    C->>A: POST /diagnoses/{id}/optical-upload-urls
+    A->>L: (JWT verified by API Gateway)
+    L->>D: check diagnosis belongs to this doctor
+    L->>D: store server-generated S3 keys
+    L-->>C: two presigned POST forms (10 MB cap, image/* only, 5 min)
+    C->>S: upload image 1 and image 2 directly
+    C->>A: PATCH /diagnoses/{id}/optical {provisional_diagnosis}
+    L->>S: read both images (keys from the DB, not the client)
+    L->>L: SSIM -> deviation = 1 - ssim -> band -> score lookup
+    L->>D: save deviation, final_score, status
+    L-->>C: ssim, deviation, band, final_score, resized, warning
+```
+
+**Endpoints (all JWT-protected except /health):**
+
+| Method + path | Purpose |
+|---|---|
+| `POST /patients`, `GET /patients` | Patients, scoped to the calling doctor |
+| `POST /diagnoses/clinical-match` | Creates the diagnosis (state initiator, status `pending`) |
+| `PATCH /diagnoses/{id}/clinical-lookup` | Differential diagnosis + advise from `clinical_rules` |
+| `POST /diagnoses/{id}/optical-upload-urls` | Presigned S3 upload forms; stores the S3 keys |
+| `PATCH /diagnoses/{id}/optical` | SSIM -> band -> score; sets `complete` |
+
+**Design decisions and why:**
+- **Single Lambda, no container.** OpenCV + scikit-image is 441 MB unzipped (Lambda limit 250 MB). SSIM was re-implemented with numpy + Pillow (zip 32 MB). Same-size image pairs give results identical to the original OpenCV pipeline; resized pairs can differ by up to ~0.004 SSIM (the Borderline band is 0.04 wide). The API returns `resized`.
+- **Images bypass the API.** API Gateway caps requests at 10 MB and Lambda at 6 MB; base64 adds a third. Presigned POST sends images straight to S3, with a policy enforcing size and type.
+- **Server-chosen S3 keys.** The analysis step reads keys stored on the diagnosis, never a client-supplied key (prevents reading someone else's object).
+- **Scoring in code, not a table.** 78-row lookup, generated from the Excel by script (`scoring_engine.py`); no database round trip.
+- **BOLA protection.** Every diagnosis query filters on `doctor_id`; a wrong or foreign id returns 404, same as a missing one.
+
+**Deliberately not built yet:** DL inference (SageMaker Serverless or a container Lambda), SQS/SNS async processing (everything is synchronous, ~4 s for a 12 MP pair), frontend, locked-down CORS.

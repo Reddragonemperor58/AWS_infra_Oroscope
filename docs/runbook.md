@@ -188,3 +188,55 @@ Skipping `create_type=False` causes SQLAlchemy to attempt creating the type a se
 Go to: **Console → Billing and Cost Management → Cost Explorer → group by Service**, filtered to the relevant date range. Don't guess — check.
 
 
+## Build and deploy the Lambda
+
+Run from the repo root. Lambda zips are Linux-only, so `build_lambda.sh` fetches Linux wheels even on Windows/macOS.
+
+```bash
+services/control-plane/build_lambda.sh      # builds fastapi_backend.zip (~32 MB zipped; limits 50 MB / 250 MB unzipped)
+cd infra && terraform plan                   # read it: expect only the Lambda code hash to change
+terraform apply
+```
+
+- `services/control-plane/package/` and `fastapi_backend.zip` are build output and are git-ignored. Never commit them.
+- boto3 is deliberately left out of the zip (the Lambda runtime provides it).
+- **Two clones of the repo exist (Windows laptop + Linux).** Always `git pull` before editing; a stale clone caused a broken `main.py` once.
+
+## End-to-end test of the optical flow
+
+```bash
+pip install requests pillow numpy
+export API_URL="https://jy3bq91s6k.execute-api.ap-south-2.amazonaws.com"
+export ID_TOKEN="<IdToken printed by test_login.py>"      # must be EXPORTED; expires after ~1 hour
+python3 scripts/test_optical_flow.py <image1> <image2> "Fibroma"
+```
+Expected: every step 200/204, final line `MATCH` (API SSIM equals a local recomputation). Test photos stay out of git (`scripts/*.png`, `scripts/*.jpg` are ignored).
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `404 {"message":"Not Found"}` | API Gateway route missing. `aws apigatewayv2 get-routes --api-id jy3bq91s6k --region ap-south-2 --query 'Items[].RouteKey'` should list 7 routes |
+| `401` | Missing/expired token (ID tokens last ~1 h); re-run `test_login.py` |
+| `503` + `Retry-After: 5` | Aurora auto-paused and resuming (scale-to-zero); retry in a few seconds |
+| `KeyError: 'ID_TOKEN'` | Variable set without `export` |
+| S3 upload `403` | Presigned form expired (5 min), file over 10 MB, or Content-Type not `image/*` |
+| `409` on PATCH optical | Images not uploaded yet; request upload URLs and upload both |
+| `422` on PATCH optical | An uploaded file is not a decodable image |
+| `warning: ... not in the scoring sheet` | Provisional diagnosis name has no scoring row; `final_score` is cleared and status returns to `pending` |
+| Terraform shows route/Lambda destroys | Stop; do not apply. Compare against `get-routes` and state |
+
+## Clean up test data
+
+Test patients are named "Optical Test". Delete them (diagnoses cascade) through the Data API:
+```bash
+aws rds-data execute-statement --region ap-south-2 --database oroscope_aurora \
+  --resource-arn "$(terraform -chdir=infra output -raw aurora_cluster_arn)" \
+  --secret-arn "$(terraform -chdir=infra output -raw aurora_secret_arn)" \
+  --sql "DELETE FROM patients WHERE name = 'Optical Test';"
+```
+Images expire from S3 automatically after 30 days.
+
+## Open items
+- Dentist to confirm: aliases IRRITATION FIBROMA -> Fibroma and APTHOUS STOMATITIS -> Apthous Ulcer; the 7 scored diagnoses with no clinical_rules rows.
+- `clinical_rules.provisional_diagnosis` has inconsistent case/whitespace; scoring matching ignores both, the rules lookup does not (verify before relying on it for non-uppercase names).
