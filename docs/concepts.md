@@ -64,17 +64,18 @@
   * **IaC / Terraform (Secondary):** Referencing dynamic resource attributes (`aws_vpc.main.id`) keeps code resilient, whereas hardcoding literal string values (`"vpc-12345"`) breaks the code if the underlying infrastructure is destroyed and recreated.
 * **Credit-Based vs. Always Free AWS Billing:** Credit-based offers expire after a set timeline or dollar limit. Always Free tiers (like 1M Lambda requests/month) persist indefinitely as long as usage stays under the strict monthly cap.
 
-## Presigned POST (why images skip the API)
-S3 can hand a client a short-lived, signed upload form. The Lambda signs it with its own permissions and embeds rules (max size, allowed content type, exact key). The client then uploads straight to S3, so large files never pass through API Gateway (10 MB limit) or Lambda (6 MB payload limit). Interview line: "the control plane authorizes, S3 carries the bytes."
+### Image upload & optical analysis
+  * **Presigned POST (why images skip the API)**
+  S3 can hand a client a short-lived, signed upload form. The Lambda signs it with its own permissions and embeds rules (max size, allowed content type, exact key). The client then uploads straight to S3, so large files never pass through API Gateway (10 MB limit) or Lambda (6 MB payload limit). Interview line: "the control plane authorizes, S3 carries the bytes."
 
-## SSIM and deviation
-SSIM (structural similarity) compares two images in local windows (here 7x7 on equalized grayscale) and returns 1.0 for identical images. The business thresholds (0.16 / 0.20) are on the *deviation*, so deviation = 1 - SSIM. Higher deviation means the red- and blue-light photos differ more.
+  * **SSIM and deviation**
+  SSIM (structural similarity) compares two images in local windows (here 7x7 on equalized grayscale) and returns 1.0 for identical images. The business thresholds (0.16 / 0.20) are on the *deviation*, so deviation = 1 - SSIM. Higher deviation means the red- and blue-light photos differ more.
 
-## Lambda size limits and what they force
-250 MB unzipped / 50 MB direct zip upload. OpenCV + scikit-image alone is 441 MB, so either use a container image (up to 10 GB, adds ECR + Docker) or replace the heavy libraries. We replaced them and proved equivalence numerically (SSIM maths matches scikit-image to ~1e-16; identical end-to-end for same-size pairs).
+  * **Lambda size limits and what they force**
+  250 MB unzipped / 50 MB direct zip upload. OpenCV + scikit-image alone is 441 MB, so either use a container image (up to 10 GB, adds ECR + Docker) or replace the heavy libraries. We replaced them and proved equivalence numerically (SSIM maths matches scikit-image to ~1e-16; identical end-to-end for same-size pairs).
 
-## Terraform `moved` blocks
-Renaming a resource label normally looks like destroy + create. A `moved` block tells Terraform it is the same object, so the live API Gateway route was relabelled in state with no downtime.
+  * **Terraform `moved` blocks**
+  Renaming a resource label normally looks like destroy + create. A `moved` block tells Terraform it is the same object, so the live API Gateway route was relabelled in state with no downtime.
 
-## BOLA (Broken Object Level Authorization)
-Every object query filters by the calling user's id. Returning 404 for both "missing" and "not yours" avoids leaking which ids exist.
+  * **BOLA (Broken Object Level Authorization)**
+  Every object query filters by the calling user's id. Returning 404 for both "missing" and "not yours" avoids leaking which ids exist.

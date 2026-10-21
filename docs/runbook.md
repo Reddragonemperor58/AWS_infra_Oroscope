@@ -115,25 +115,7 @@ A clean rejection (a real HTTP status your own code returned, e.g. `401` with a 
 ---
 
 ## Packaging the Control-Plane Lambda
-Run from `services/control-plane/`. Cross-compiles dependencies explicitly for Lambda's runtime, since local dev may be on a newer/different Python than Lambda supports (Lambda currently maxes out at Python 3.13):
-
-```bash
-# 1. Clean staging directory
-mkdir -p package
-
-# 2. Force pip to fetch Lambda-compatible Linux binaries, not local-platform ones
-pip install --platform manylinux2014_x86_64 --target=package --implementation cp \
-  --python-version 3.13 --only-binary=:all: -r requirements.txt
-
-# 3. Copy application code only — local.py and tests/ must not ship
-cp -r app/ package/app/
-find package/app -type d -name "__pycache__" -exec rm -rf {} +
-rm -rf package/app/tests
-
-# 4. Zip and clean up
-cd package && zip -r ../fastapi_backend.zip . && cd ..
-rm -rf package
-```
+See ‘Build and deploy the Lambda’ below
 `--only-binary=:all:` is required, not optional — without it, pip may silently fall back to compiling a package from source using your local toolchain, producing a binary built for your machine instead of Lambda's, defeating the whole point of `--platform`.
 
 ---
