@@ -295,10 +295,11 @@ def run_optical_analysis(
 
     diagnosis.optical_deviation_index = Decimal(str(round(deviation, 6)))
     warning = None
+    diagnosis.final_score = final_score  # None on a lookup miss: clears any stale score
     if final_score is None:
         warning = f"'{request.provisional_diagnosis}' is not in the scoring sheet; no final score computed"
+        diagnosis.status = DiagnosisStatus.pending
     else:
-        diagnosis.final_score = final_score
         diagnosis.status = DiagnosisStatus.complete  # prototype: DL step skipped, so this is the last step
     db.commit()
     db.refresh(diagnosis)
