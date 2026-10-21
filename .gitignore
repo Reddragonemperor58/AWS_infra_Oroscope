@@ -33,3 +33,7 @@ test_login.py
 test_login.py*.xlsx
 services/control-plane/fastapi_backend.zip
 services/control-plane/app/data/clinical_rules.json
+services/control-plane/package/
+services/control-plane/fastapi_backend.zip
+scripts/*.png
+scripts/*.jpg

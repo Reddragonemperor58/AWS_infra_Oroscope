@@ -53,9 +53,40 @@ resource "aws_apigatewayv2_route" "post_patients" {
   authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
 }
 
-resource "aws_apigatewayv2_route" "clinical_match" {
+# The old block was labelled clinical_match but routed the PATCH lookup. Rename it in state
+# (no destroy/recreate) and give the POST route its own block below.
+moved {
+  from = aws_apigatewayv2_route.clinical_match
+  to   = aws_apigatewayv2_route.clinical_lookup
+}
+
+resource "aws_apigatewayv2_route" "clinical_lookup" {
   api_id             = aws_apigatewayv2_api.main.id
   route_key          = "PATCH /diagnoses/{diagnosis_id}/clinical-lookup"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
+}
+
+resource "aws_apigatewayv2_route" "clinical_match_create" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "POST /diagnoses/clinical-match"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
+}
+
+resource "aws_apigatewayv2_route" "optical_upload_urls" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "POST /diagnoses/{diagnosis_id}/optical-upload-urls"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
+}
+
+resource "aws_apigatewayv2_route" "optical_analysis" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "PATCH /diagnoses/{diagnosis_id}/optical"
   target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
   authorization_type = "JWT"
   authorizer_id      = aws_apigatewayv2_authorizer.cognito.id

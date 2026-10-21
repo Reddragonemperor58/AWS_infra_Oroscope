@@ -4,3 +4,5 @@ mangum
 sqlalchemy
 sqlalchemy-aurora-data-api
 boto3
+numpy
+pillow
