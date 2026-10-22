@@ -204,7 +204,13 @@ aws cognito-idp list-users --user-pool-id <pool id> --region ap-south-2
 aws cognito-idp admin-create-user --user-pool-id <pool id> --username <email> --region ap-south-2
 aws cognito-idp admin-set-user-password --user-pool-id <pool id> --username <email> --password '<password>' --permanent --region ap-south-2
 ```
-A new Cognito user also needs a row in `users` (ADR 0010: no automatic sync yet), with `id` set to the user's Cognito `sub`.
+Create the doctor with the `email` attribute (the ID token must carry it):
+```bash
+aws cognito-idp admin-create-user --user-pool-id <pool id> --username <email> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true \
+  --message-action SUPPRESS --region ap-south-2
+```
+No database step is needed: the `users` row is created automatically on the doctor's first request (ADR 0010). To remove a doctor, delete the Cognito user and then `DELETE FROM users WHERE email = '<email>'` (their patients and diagnoses cascade).
 
 ## Scripts
 
@@ -241,7 +247,8 @@ Expected: every step 200/204, final line `MATCH` (API SSIM equals a local recomp
 | Browser console: CSP violation | Something inline or from another host was added; keep scripts and styles as files in `frontend/` |
 | Login fails with the right password | User missing or password reset: check `list-users`, re-run `admin-set-user-password` |
 | Page loads but is unstyled / old | Hard refresh (Ctrl+Shift+R); confirm `terraform apply` uploaded the file |
-| Adding a patient fails after a fresh login | The Cognito user has no row in `users` (ADR 0010) |
+| `401` "Token has no email claim" | An access token was sent; the API needs the Cognito ID token |
+| `409` "email is already registered to a different account" | A Cognito user was deleted and recreated with the same email (new `sub`). Delete the stale `users` row for that email |
 | Terraform shows route/Lambda destroys | Stop; do not apply. Compare against `get-routes` and state |
 
 ## Clean up test data
@@ -260,6 +267,5 @@ Images expire from S3 automatically after 30 days.
 - Confirm with the original app that two or more ticks should collapse to `Multiple symptoms` / `Multiple habits` / `Multiple areas` (confirmed working only for oral mapping against the table).
 - Image retention (30 days) is a placeholder; confirm with the clinic.
 - `clinical_rules.provisional_diagnosis` has inconsistent case/whitespace in the source; both scoring and the rules lookup now ignore it (lookup compares `upper(btrim())`; zero conflicts proven). `rules_engine.py` is a database lookup only.
-- Cognito-to-`users` sync is still manual (ADR 0010).
 - Not built: DL inference, SQS/SNS async processing.
 - Add an AWS Budgets alert.

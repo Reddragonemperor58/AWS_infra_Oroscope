@@ -26,15 +26,15 @@ A diagnosis is built up in steps (state machine, ADR 0007): clinical-match creat
 - `id` (String 36, PK)
 - `patient_id` (String 36, FK -> Patients.id, Not Null)
 - `doctor_id` (String 36, FK -> Users.id, Not Null) - Denormalized for dashboard query speed
-- `mucosal_type` (String 100, Nullable)
+- `mucosal_type` (String 100, Nullable) - Stores the clinical form's "Mucosal condition" input (the API field is `mucosal_condition`); it is the `mucosal_condition` part of the clinical_rules match key
 - `ulcer` (String 255, Nullable)
 - `patch` (String 255, Nullable)
 - `growth` (String 255, Nullable)
 - `sharp_objects` (String 255, Nullable) - Clinical input; part of the clinical_rules match key
 - `pigmentation` (String 255, Nullable) - Clinical input; part of the clinical_rules match key
 - `oral_mapping` (String 255, Nullable) - Clinical input; part of the clinical_rules match key. Single canonical value; "Multiple areas" when the doctor ticks two or more
-- `symptoms` (String 255, Nullable) - Single canonical value (e.g. "Swelling", "No Symptoms"), not a list. "Multiple symptoms" when the doctor ticks two or more (the UI collapses them)
-- `habits` (String 255, Nullable) - Single canonical value (e.g. "Tobacco Chewing", "No Habits"), not a list. "Multiple habits" when the doctor ticks two or more
+- `symptoms` (JSONB, Nullable) - Holds one JSON string value (verified live), not a list or object. Single canonical value (e.g. "Swelling", "No Symptoms"), not a list. "Multiple symptoms" when the doctor ticks two or more (the UI collapses them)
+- `habits` (JSONB, Nullable) - Holds one JSON string value (verified live), not a list or object. Single canonical value (e.g. "Tobacco Chewing", "No Habits"), not a list. "Multiple habits" when the doctor ticks two or more
 - `dl_image_s3_key` (String 255, Nullable) - Unused in the prototype (DL step skipped)
 - `optical_image_1_s3_key` (String 255, Nullable) - Set by POST /diagnoses/{id}/optical-upload-urls (server-generated: `diagnoses/{id}/optical_1`); never client-supplied
 - `optical_image_2_s3_key` (String 255, Nullable) - Same, `diagnoses/{id}/optical_2`
@@ -80,7 +80,9 @@ The optical scoring table (`Scoring_excel_0_to_5_1.xlsx`: Provisional Diagnosis 
 
 **TODOs:**
 
-- Decide `ON DELETE` behaviour for the `doctor_id` foreign keys (Patients and Diagnoses reference Users). Deleting a patient currently cascades to its diagnoses; deleting a user is not defined.
+- Verify against the live database that the foreign keys have `ON DELETE CASCADE` (`models.py` declares it for `Patients.doctor_id`, `Diagnoses.patient_id` and `Diagnoses.doctor_id`). Deleting a user then removes their patients and diagnoses.
+- `symptoms` and `habits` are JSONB columns that store a single JSON string. A plain `varchar` would be simpler and index-friendly; changing it needs a migration, so it is left as is (it works and was verified live).
+- `Users.id` is the Cognito `sub`; the row is created automatically on a doctor's first request (ADR 0010).
 - Confirm that "two or more ticks -> Multiple symptoms / habits / areas" matches the original app.
 - `updated_at` columns currently only set on INSERT. Need to configure SQLAlchemy `onupdate` hooks or Postgres triggers to refresh on UPDATE.
 - Decide where `provisional_diagnosis` is persisted once the DL step exists (a new column vs. `dl_label`). Until then it is request input, so a Diagnosis row does not record which diagnosis its score was computed from.

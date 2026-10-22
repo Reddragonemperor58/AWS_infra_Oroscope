@@ -33,4 +33,4 @@ The initial prototype used a hardcoded JWT implementation in `auth.py` with a fi
 * **Session Management:** The frontend must strictly use `GetTokensFromRefreshToken` for session renewal.
 * **Security Posture:** By omitting a client secret, we accept that security relies entirely on the robust implementation of SRP, token rotation, and strict Redirect URI validation, rather than a static shared secret.
 * **Testing:** Backend engineers cannot use the standard AWS CLI `initiate-auth` command to test logins. Testing requires the `pycognito` Python library to calculate the SRP primes locally.
-* **User sync gap:** no mechanism currently syncs a Cognito user to a `users` row; see ADR 0010. Until resolved, every new doctor needs a manual insert.
+* **User sync:** no mechanism currently syncs a Cognito user to a `users` row; resolved in ADR 0010 by creating the `users` row lazily on the first authenticated request.

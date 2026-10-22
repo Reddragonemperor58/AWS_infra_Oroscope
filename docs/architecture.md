@@ -61,7 +61,7 @@ explicitly for Lambda (`manylinux2014_x86_64` wheels); see `runbook.md`.
 
 **Auth model:** No JWT decoding happens in application code. The Cognito JWT
 authorizer on API Gateway verifies the token's signature and expiry before
-Lambda ever runs; the application only reads the already-verified `sub` claim
+Lambda ever runs; the application only reads the already-verified claims
 out of the event, via `request.scope["aws.event"]`.
 
 **IAM permissions (least privilege, confirmed working via direct invoke):**
@@ -78,6 +78,8 @@ entirely:** cold start succeeds, all dependencies load correctly under the
 Lambda runtime, Mangum correctly parses a full API Gateway v2 event, and the
 auth-rejection path returns a clean 401 rather than an unhandled exception
 when authorizer claims are absent.
+
+**User provisioning (ADR 0010):** the first authenticated request from a new Cognito identity creates its `users` row from the verified `sub` and `email` claims (`INSERT ... ON CONFLICT DO NOTHING`). No manual insert is needed.
 
 ## Edge (API Gateway)
 
@@ -136,7 +138,7 @@ sequenceDiagram
 - **Scoring in code, not a table.** 81-entry lookup (27 diagnoses x 3 bands: 78 sheet rows + Variable Diagnosis = 0 in each band), generated from the Excel by script (`scoring_engine.py`); no database round trip.
 - **BOLA protection.** Every diagnosis query filters on `doctor_id`; a wrong or foreign id returns 404, same as a missing one.
 
-**Deliberately not built yet:** DL inference (SageMaker Serverless or a container Lambda), SQS/SNS async processing (everything is synchronous, ~4 s for a 12 MP pair), and automatic Cognito-to-`users` sync (ADR 0010: each new doctor needs a manual insert).
+**Deliberately not built yet:** DL inference (SageMaker Serverless or a container Lambda), SQS/SNS async processing (everything is synchronous, ~4 s for a 12 MP pair).
 
 ## Frontend (ADR 0013)
 
