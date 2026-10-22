@@ -7,13 +7,14 @@
 | Aurora Serverless v2 | $0.14 for the entire first build day (creation + retries + live testing + 2 migrations) | Driven by active use resetting the 3600s auto-pause timer, not a steady-state rate. Once genuinely idle for an hour, drops to 0 ACU — near-$0 at rest |
 | Data API | $0 so far | 1M requests/month free for account's first year; $0.20-0.70/million after. Not "free" as a feature — just cheap and within the allowance at this volume |
 | Lambda | $0, expected to stay $0 at this scale | 1M requests + 400,000 GB-seconds/month, permanently free (not a 12-month trial) |
-| CloudFront  Not provisioned yet| $0 expected | ~1TB egress + 10M requests/month, permanently free |
+| CloudFront | $0 expected | Provisioned (PriceClass_200, default certificate, caching disabled). ~1TB egress + 10M requests/month, permanently free |
+| S3 frontend bucket | ~$0 | A few hundred KB of static files |
 | API Gateway | $0 expected | 1M requests/month free tier |
 | Cognito | $0 expected | Free up to 10,000 monthly active users — nowhere close at this scale |
 
 **Steady-state floor once idle:** ~$0.40-something/month (Secrets Manager), plus small
 RDS blips every time the app is actively used. Everything else genuinely rounds to zero
-at this traffic volume.cf 
+at this traffic volume.
 
 ## Stage 4a additions (optical analysis) - approximate, verify on the AWS pricing page for ap-south-2
 
@@ -27,5 +28,9 @@ at this traffic volume.cf
 **Costs avoided by design:** no ECR repository, no second Lambda, no container image storage, no NAT gateway, no SageMaker endpoint (DL skipped). The memory increase from 256 MB to 1024 MB only costs money while a request runs.
 
 **Still the dominant cost:** Aurora Serverless v2. Scale-to-zero (min 0 ACU, pause after 3600 s) means an idle database costs only storage; the first request after a pause returns 503 while it resumes.
+
+**Frontend (ADR 0013):** S3 + CloudFront stay inside the permanent free tiers at prototype volume. Caching is disabled so a deploy shows immediately; this only costs requests to the S3 origin, which are negligible here. Revisit if traffic grows (enable caching + invalidate on deploy).
+
+**Recommended guard:** an AWS Budgets alert (e.g. $5/month) so a mistake or a left-on resource cannot surprise you.
 
 **Cost risks to watch:** the future DL endpoint (a real-time SageMaker endpoint bills continuously; use Serverless Inference or a container Lambda instead), and the 6 MB / 10 MB payload limits pushing anyone toward a bigger architecture than needed.

@@ -1,5 +1,8 @@
 # ADR 0008: Lambda Packaging and Runtime Compatibility
 
+## Status
+Accepted; decision 2 (bundling boto3) was reversed by ADR 0012, see the update below.
+
 ## Context
 AWS Lambda currently supports a maximum Python runtime of 3.13, while local development environments may run newer versions (e.g., Python 3.14). Furthermore, dependencies like `pydantic` rely on compiled C/Rust extensions. A naive `pip freeze` and zip operation results in bloated deployment packages and runtime crashes due to glibc/bytecode mismatches.
 
@@ -13,3 +16,7 @@ AWS Lambda currently supports a maximum Python runtime of 3.13, while local deve
 * The deployment zip is marginally larger due to the deterministic `boto3` inclusion.
 * We completely avoid cross-platform compiled extension crashes in production.
 * Lambda cold starts are optimized by stripping unnecessary dev tooling and test directories.
+## Update (ADR 0012)
+- boto3 is still listed in `requirements.txt` (for local use and dependency resolution) but `build_lambda.sh` removes it from the zip, because the Lambda runtime provides it and the zip must stay under the 250 MB unzipped limit. This reverses decision 2.
+- `build_lambda.sh` also removes the test directory (`app/tests`) from the zip.
+- Current size: ~32 MB zipped / ~108 MB unzipped with numpy and Pillow added (limits 50 MB / 250 MB).

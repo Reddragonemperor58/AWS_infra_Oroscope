@@ -10,5 +10,6 @@ As we build the Control Plane (FastAPI/Mangum), two architectural boundaries mus
 2. **Local Auth via Dependency Overrides:** We reject embedding a `LOCAL_DEV` environment variable check inside the production auth path. Instead, local development will use a separate entrypoint (`local.py`) that utilizes FastAPI's `app.dependency_overrides` to inject a mock user. 
 
 ## Consequences
+* API Gateway's CORS `allow_origins` is now locked to the CloudFront origin (ADR 0013).
 * The production code in `dependencies.py` has no escape hatch; it will securely crash if the AWS event context is missing.
 * Local development requires running `python local.py` instead of the standard `uvicorn app.main:app`.

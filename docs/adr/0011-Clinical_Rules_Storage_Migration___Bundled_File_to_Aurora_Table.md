@@ -61,3 +61,6 @@ memory at cold start.
 - ADR 0005 is superseded by this ADR for the clinical rules specifically;
   its core reasoning (bundled files for small, static data) remains valid
   in general and is unaffected for anything else that stays genuinely small.
+## Update (Stage 4b)
+- The lookup compares `provisional_diagnosis` case- and whitespace-insensitively (`upper(btrim(...))`) because the source data is inconsistent; zero conflicts were proven across the table.
+- `rules_engine.py` now contains only `get_differential_and_advise` (a database lookup). The unused JSON-loading code and `app/data/*.json` were removed.

@@ -4,7 +4,7 @@ resource "aws_apigatewayv2_api" "main" {
   tags          = local.common_tags
 
   cors_configuration {
-    allow_origins = ["*"] # TODO: replace with real frontend domain once it exists
+    allow_origins = ["https://${aws_cloudfront_distribution.frontend.domain_name}"]
     allow_methods = ["GET", "POST", "PUT", "PATCH", "OPTIONS"]
     allow_headers = ["authorization", "content-type"]
   }

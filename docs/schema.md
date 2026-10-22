@@ -32,9 +32,9 @@ A diagnosis is built up in steps (state machine, ADR 0007): clinical-match creat
 - `growth` (String 255, Nullable)
 - `sharp_objects` (String 255, Nullable) - Clinical input; part of the clinical_rules match key
 - `pigmentation` (String 255, Nullable) - Clinical input; part of the clinical_rules match key
-- `oral_mapping` (String 255, Nullable) - Clinical input; part of the clinical_rules match key
-- `symptoms` (String 255, Nullable) - Single canonical value (e.g. "Swelling", "No Symptoms"), not a list
-- `habits` (String 255, Nullable) - Single canonical value (e.g. "Tobacco Chewing", "No Habits"), not a list
+- `oral_mapping` (String 255, Nullable) - Clinical input; part of the clinical_rules match key. Single canonical value; "Multiple areas" when the doctor ticks two or more
+- `symptoms` (String 255, Nullable) - Single canonical value (e.g. "Swelling", "No Symptoms"), not a list. "Multiple symptoms" when the doctor ticks two or more (the UI collapses them)
+- `habits` (String 255, Nullable) - Single canonical value (e.g. "Tobacco Chewing", "No Habits"), not a list. "Multiple habits" when the doctor ticks two or more
 - `dl_image_s3_key` (String 255, Nullable) - Unused in the prototype (DL step skipped)
 - `optical_image_1_s3_key` (String 255, Nullable) - Set by POST /diagnoses/{id}/optical-upload-urls (server-generated: `diagnoses/{id}/optical_1`); never client-supplied
 - `optical_image_2_s3_key` (String 255, Nullable) - Same, `diagnoses/{id}/optical_2`
@@ -57,19 +57,19 @@ Reference data - the full clinical decision table, loaded once from
 
 - `id` (Integer, PK)
 - `ulcer`, `patch`, `growth`, `mucosal_condition`, `sharp_objects`, `pigmentation`, `symptoms`, `habits`, `oral_mapping` (String 255, Not Null) - nine clinical inputs
-- `provisional_diagnosis` (String 255, Not Null) - tenth input; the DL model's classification, supplied manually until the DL step exists. Source data has inconsistent case and whitespace (e.g. "SPECKLED LEUKOPLAKIA", " Speckled Leukoplakia"); includes the rule category "VARIABLE DIAGNOSIS" (2,464 rows: no lesion, symptom + habit)
+- `provisional_diagnosis` (String 255, Not Null) - tenth input; the DL model's classification, supplied manually until the DL step exists. Source data has inconsistent case and whitespace (e.g. "SPECKLED LEUKOPLAKIA", " Speckled Leukoplakia"), so the lookup compares `upper(btrim(provisional_diagnosis))` (zero conflicts proven across the table); includes the rule category "VARIABLE DIAGNOSIS" (2,464 rows: no lesion, symptom + habit)
 - `differential_diagnosis` (String 255, Not Null)
 - `advise` (Text, Not Null)
 
 ## Scoring (not a table)
 
-The optical scoring table (`Scoring_excel_0_to_5_1.xlsx`: Provisional Diagnosis x image-analysis band -> Score 0-5) is 78 rows plus one dentist-confirmed category, so it lives in code, not the database: `services/control-plane/app/scoring_engine.py`, generated from the Excel by script.
+The optical scoring table (`Scoring_excel_0_to_5_1.xlsx`: Provisional Diagnosis x image-analysis band -> Score 0-5) is 78 rows (26 diagnoses x 3 bands) plus one dentist-confirmed category (Variable Diagnosis x 3 bands = 0), 81 entries in total for 27 diagnoses, so it lives in code, not the database: `services/control-plane/app/scoring_engine.py`, generated from the Excel by script.
 
 - Bands from the deviation: `< 0.16` Variable Diagnosis; `<= 0.20` Borderline; otherwise Suggestive of Dysplasia.
 - Diagnosis names match case-, whitespace- and apostrophe-insensitively.
 - Source-sheet conflict resolved by the owner: Fibroma + Suggestive of Dysplasia = 3 (the sheet held both 2 and 3).
 - "Variable Diagnosis" (a clinical_rules category, not in the Excel) scores 0 in every band, dentist-confirmed.
-- Aliases in the code, to confirm clinically: IRRITATION FIBROMA -> Fibroma; APTHOUS STOMATITIS -> Apthous Ulcer.
+- Aliases in the code, **UNCONFIRMED** clinically: IRRITATION FIBROMA -> Fibroma; APTHOUS STOMATITIS -> Apthous Ulcer.
 
 **Indexes:**
 
@@ -80,6 +80,8 @@ The optical scoring table (`Scoring_excel_0_to_5_1.xlsx`: Provisional Diagnosis 
 
 **TODOs:**
 
+- Decide `ON DELETE` behaviour for the `doctor_id` foreign keys (Patients and Diagnoses reference Users). Deleting a patient currently cascades to its diagnoses; deleting a user is not defined.
+- Confirm that "two or more ticks -> Multiple symptoms / habits / areas" matches the original app.
 - `updated_at` columns currently only set on INSERT. Need to configure SQLAlchemy `onupdate` hooks or Postgres triggers to refresh on UPDATE.
 - Decide where `provisional_diagnosis` is persisted once the DL step exists (a new column vs. `dl_label`). Until then it is request input, so a Diagnosis row does not record which diagnosis its score was computed from.
 - Confirm the two scoring aliases (IRRITATION FIBROMA, APTHOUS STOMATITIS) and the 7 scored diagnoses with no clinical_rules rows (Fissured Tongue, Geographic Tongue, Herpetic Stomatitis, Melanin Patches, Severe Dysplasia, Smoker's Palate, Verrucous Carcinoma) with the dentist.

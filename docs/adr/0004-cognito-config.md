@@ -29,8 +29,8 @@ The initial prototype used a hardcoded JWT implementation in `auth.py` with a fi
    * *Rationale:* The client consuming this API is a React Single Page Application (SPA), which executes entirely in the user's browser. SPAs are "public clients," meaning they cannot securely store a cryptographic client secret—any embedded secret can be easily extracted by inspecting the JavaScript bundle or monitoring network traffic. If a secret had been generated, AWS would mandate calculating a `SECRET_HASH` for every authentication request. This would force the frontend to either expose the secret locally to calculate the hash, or rely on a backend proxy, defeating the purpose of a direct Cognito integration. 
 
 ## Consequences
-* **Frontend Burden:** The React frontend (Stage 5) cannot simply POST a password to an endpoint. It must use a library capable of the SRP cryptographic handshake (e.g., AWS Amplify Auth or `amazon-cognito-identity-js`).
+* **Frontend Burden:** The frontend cannot simply POST a password to an endpoint. It must use a library capable of the SRP cryptographic handshake. Implemented (ADR 0013) with `amazon-cognito-identity-js`, vendored into the static page; tokens are kept in memory only.
 * **Session Management:** The frontend must strictly use `GetTokensFromRefreshToken` for session renewal.
 * **Security Posture:** By omitting a client secret, we accept that security relies entirely on the robust implementation of SRP, token rotation, and strict Redirect URI validation, rather than a static shared secret.
 * **Testing:** Backend engineers cannot use the standard AWS CLI `initiate-auth` command to test logins. Testing requires the `pycognito` Python library to calculate the SRP primes locally.
-no mechanism currently syncs a Cognito user to a Users row; verify whether Post-Confirmation fires for admin-created accounts before building on that assumption; until resolved, every new doctor needs a manual insert like the one above.
+* **User sync gap:** no mechanism currently syncs a Cognito user to a `users` row; see ADR 0010. Until resolved, every new doctor needs a manual insert.

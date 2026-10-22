@@ -9,7 +9,8 @@
 5. Cognito User Pool
 6. API Gateway
 7. Control Plane Lambda
-8. S3 Images bucket
+8. S3 images bucket (private, 30-day expiry placeholder)
+9. S3 frontend bucket (private) + CloudFront distribution (Origin Access Control, security-headers policy)
 
 ## Database
 
@@ -45,7 +46,7 @@ Maintained centrally via a `locals` block, so every resource references `local.n
 
 There is currently no NAT Gateway and no Internet Gateway anywhere in this VPC. Nothing inside the VPC ever needs outbound internet access — the database only responds to inbound Data API queries (security groups are stateful; no egress rules are needed for this to work), and the Lambda that needs to reach S3 or other AWS services is kept entirely outside the VPC, so it never requires a NAT Gateway or a VPC endpoint to reach anything.
 
-Confirmed: the Stage 3 Lambda queries the database via the Data API with no VPC attachment, verified via direct invoke and a live foreign-key constraint rejection (see runbook.md)."
+Confirmed: the Stage 3 Lambda queries the database via the Data API with no VPC attachment, verified via direct invoke and a live foreign-key constraint rejection (see runbook.md).
 
 ## Compute (Control Plane)
 
@@ -58,17 +59,19 @@ API Gateway's event structure into an ASGI request FastAPI understands natively.
 development runs Python 3.14, which required cross-compiling dependencies
 explicitly for Lambda (`manylinux2014_x86_64` wheels); see `runbook.md`.
 
-**Auth model:** No JWT decoding happens in application code. A Cognito
-authorizer (once wired via API Gateway) verifies the token's signature and
-expiry before Lambda ever runs; the application only reads the already-verified
-`sub` claim out of the event, via `request.scope["aws.event"]`.
+**Auth model:** No JWT decoding happens in application code. The Cognito JWT
+authorizer on API Gateway verifies the token's signature and expiry before
+Lambda ever runs; the application only reads the already-verified `sub` claim
+out of the event, via `request.scope["aws.event"]`.
 
 **IAM permissions (least privilege, confirmed working via direct invoke):**
 `rds-data:ExecuteStatement` and related actions scoped to the Aurora cluster's
 ARN; `secretsmanager:GetSecretValue` scoped to the cluster's auto-generated
-secret ARN. No `*` resources anywhere in this role, the role also has s3:PutObject
-and s3:GetObject on the images bucket’s objects only, plus the 
-Lambda’s 1024 MB memory and 30 s timeout.
+secret ARN; `s3:PutObject` and `s3:GetObject` on the objects of the images bucket
+only (presigned uploads and analysis reads). No `*` resources anywhere in this role.
+
+**Sizing:** 1024 MB memory, 30 s timeout (a 12 MP image pair takes ~4 s). The
+control-plane zip is ~32 MB zipped / ~108 MB unzipped (limits: 50 MB / 250 MB).
 
 **Empirically confirmed via direct `aws lambda invoke`, bypassing API Gateway
 entirely:** cold start succeeds, all dependencies load correctly under the
@@ -85,8 +88,11 @@ audience before Lambda invocation; unauthenticated requests never incur
 Lambda compute cost. Authorization is applied per-route: `/health` is
 intentionally open, all patient/diagnosis routes require a valid JWT.
 
-**Known temporary gap:** CORS `allow_origins` is currently `*`, pending a
-real frontend domain — tracked in ADR 0009, must be closed before production.
+**CORS:** `allow_origins` is exactly the CloudFront origin
+(`https://<distribution>.cloudfront.net`), set from Terraform. The images bucket
+allows browser POST from the same origin only. This closes the gap recorded in
+ADR 0009 (see ADR 0013). CORS is a browser rule, not authentication: the JWT
+authorizer is still what protects the routes.
 
 ## Optical analysis flow (Stage 4a, ADR 0012)
 
@@ -127,7 +133,30 @@ sequenceDiagram
 - **Single Lambda, no container.** OpenCV + scikit-image is 441 MB unzipped (Lambda limit 250 MB). SSIM was re-implemented with numpy + Pillow (zip 32 MB). Same-size image pairs give results identical to the original OpenCV pipeline; resized pairs can differ by up to ~0.004 SSIM (the Borderline band is 0.04 wide). The API returns `resized`.
 - **Images bypass the API.** API Gateway caps requests at 10 MB and Lambda at 6 MB; base64 adds a third. Presigned POST sends images straight to S3, with a policy enforcing size and type.
 - **Server-chosen S3 keys.** The analysis step reads keys stored on the diagnosis, never a client-supplied key (prevents reading someone else's object).
-- **Scoring in code, not a table.** 78-row lookup, generated from the Excel by script (`scoring_engine.py`); no database round trip.
+- **Scoring in code, not a table.** 81-entry lookup (27 diagnoses x 3 bands: 78 sheet rows + Variable Diagnosis = 0 in each band), generated from the Excel by script (`scoring_engine.py`); no database round trip.
 - **BOLA protection.** Every diagnosis query filters on `doctor_id`; a wrong or foreign id returns 404, same as a missing one.
 
-**Deliberately not built yet:** DL inference (SageMaker Serverless or a container Lambda), SQS/SNS async processing (everything is synchronous, ~4 s for a 12 MP pair), frontend, locked-down CORS.
+**Deliberately not built yet:** DL inference (SageMaker Serverless or a container Lambda), SQS/SNS async processing (everything is synchronous, ~4 s for a 12 MP pair), and automatic Cognito-to-`users` sync (ADR 0010: each new doctor needs a manual insert).
+
+## Frontend (ADR 0013)
+
+A static page (plain HTML + ES modules, no framework, no build step) served from a private S3 bucket through CloudFront.
+
+```mermaid
+flowchart LR
+    B[Browser] -->|HTTPS| CF[CloudFront<br/>CSP + HSTS headers]
+    CF -->|OAC| FS[(S3 frontend bucket)]
+    B -->|SRP login| CG[Cognito user pool]
+    B -->|ID token| AG[API Gateway<br/>JWT authorizer]
+    AG --> L[Lambda FastAPI]
+    L --> D[(Aurora Data API)]
+    B -->|presigned POST| S3I[(S3 images bucket)]
+    L --> S3I
+```
+
+- **Hosting:** CloudFront with Origin Access Control; the bucket policy trusts only this distribution. Default `*.cloudfront.net` certificate, caching disabled (managed CachingDisabled policy), so `terraform apply` is the whole deploy.
+- **Runtime config:** `config.js` (API URL, region, user pool id, client id) is generated by Terraform from outputs. None of it is secret.
+- **Login:** Cognito SRP in the browser against the public app client. Tokens are held in memory only (a reload logs out). The ID token is sent to API Gateway.
+- **Headers:** CSP (`default-src 'self'`, `script-src 'self'`, `style-src 'self'`, `connect-src` limited to Cognito, API Gateway and S3 in ap-south-2, `frame-ancestors 'none'`), HSTS, nosniff, X-Frame-Options DENY, no-referrer. The UI builds DOM nodes (never `innerHTML`) and uses no inline script or style.
+- **Form behaviour:** Symptoms, Habits and Oral mapping are checkbox groups. Two or more ticks are sent as `Multiple symptoms` / `Multiple habits` / `Multiple areas` (the values the rules table uses); the "none" values are exclusive. Image 1 is red light, image 2 is blue light. Re-submitting the findings starts a new diagnosis and replaces steps 2-3 on the page.
+- **Verified in a real browser:** login, patient create, clinical lookup, upload through S3 CORS, score. Open: the "Multiple ..." collapse rule is inferred from the table and still to be confirmed against the original app.

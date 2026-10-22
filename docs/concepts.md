@@ -21,7 +21,6 @@
 * **ARN (Amazon Resource Name):** The globally unique identifier used to reference specific AWS resources.
 * **Secrets Manager:** An AWS-managed secure vault used to store and optionally rotate static secrets (like the database master password). It **does not** authenticate web requests or issue user tokens.
 * **AWS SigV4 (Signature Version 4):** A software-level cryptographic signing protocol (HMAC-SHA256) used to authenticate AWS API requests. It is highly efficient at mitigating DDoS attacks because validating the math at the edge is computationally cheap compared to database lookups.
-* **User Pool (Cognito):** The identity directory that handles end-user authentication (sign-up, sign-in, password resets) and issues JSON Web Tokens (JWTs) upon success.
 * **Identity Pool (Cognito):** A service that takes authenticated users (from a User Pool) and assigns them temporary AWS IAM credentials so their client devices can access AWS services directly.
 * **JWT (JSON Web Token):** A short-lived, cryptographically signed token used for authentication and authorization between the client and the backend.
 * **What an Authorizer Checks:** It validates the JWT sent by the client, specifically verifying the cryptographic signature (using Cognito's public keys), the token's expiration time, and the issuer.
@@ -36,10 +35,10 @@
   * **Example Analogy (The Bank Vault):**
     > **Confidential Client (Server):** Both keys are required simultaneously to open the box. Even if a thief steals the customer's key, they can't open the box without the Bank Manager standing next to them in the official bank building.
     > 
-    > **Public Client (SPA):** The app is out in the open (the browser), so there is no Bank Manager present. You cannot leave the Manager's key hanging on the wall for everyone to see. So Cognito allows the vault to open with just the customer's key, but compensates by adding extra cameras and security protocols (SRP, Token Rotation, PKCE).
-* **SRP (Secure Remote Password):** A zero-knowledge proof cryptographic protocol. It allows a client (React) to prove to a server (Cognito) that it knows a password by doing complex math locally, guaranteeing the plaintext password is never sent over the internet.
-* **PKCE (Proof Key for Code Exchange):** An optional OAuth 2.0 security extension that dynamically generates a temporary cryptographic secret for every individual authorization request. It protects Public Clients against authorization code interception attacks without requiring a static Client Secret. Its been modified to mandatory in OAuth 2.1.
-* **User Pool:** The overarching identity directory and database. It stores the actual human users, their attributes (emails, UUIDs), their hashed passwords, and global security policies (like password strength). By itself, it cannot process logins.
+    > **Public Client (SPA):** The app is out in the open (the browser), so there is no Bank Manager present. You cannot leave the Manager's key hanging on the wall for everyone to see. So Cognito allows the vault to open with just the customer's key, but compensates by adding extra cameras and security protocols (SRP, token rotation; PKCE applies only to the OAuth code flow, which this app does not use).
+* **SRP (Secure Remote Password):** A zero-knowledge proof cryptographic protocol. It allows a client (our browser page) to prove to a server (Cognito) that it knows a password by doing complex math locally, guaranteeing the plaintext password is never sent over the internet.
+* **PKCE (Proof Key for Code Exchange):** An optional OAuth 2.0 security extension that dynamically generates a temporary cryptographic secret for every individual authorization request. It protects Public Clients against authorization code interception attacks without requiring a static Client Secret. OAuth 2.1 (still an IETF draft) requires it for all clients. This app does not use the OAuth code flow; it logs in with SRP, so PKCE is not involved here.
+* **User Pool (Cognito):** The overarching identity directory and database. It handles end-user authentication (sign-in, password resets) and issues JSON Web Tokens (JWTs) on success. It stores the actual human users, their attributes (emails, UUIDs), their hashed passwords, and global security policies (like password strength). By itself, it cannot process logins.
 * **User Pool Client (App Client):** The specific configuration "doorway" that allows a software application to interact with a User Pool. A single User Pool can have multiple App Clients (e.g., one for a Web SPA, one for a Mobile App, one for a Backend Server), each with its own specific security rules, token expirations, and Client ID.
 * **Client ID:** The unique public identifier for a specific User Pool Client. It tells Cognito which "door" an authentication request is trying to use.
 * **URI vs. URL:** A URI (Uniform Resource Identifier) is a string of characters that identifies a resource either by its location, its name, or both. A URL (Uniform Resource Locator) is a specific type of URI that tells you exactly *where* a resource is on the internet and *how* to get there (e.g., starting with `https://`). **All URLs are URIs, but not all URIs are URLs.**
@@ -65,17 +64,18 @@
 * **Credit-Based vs. Always Free AWS Billing:** Credit-based offers expire after a set timeline or dollar limit. Always Free tiers (like 1M Lambda requests/month) persist indefinitely as long as usage stays under the strict monthly cap.
 
 ### Image upload & optical analysis
-  * **Presigned POST (why images skip the API)**
-  S3 can hand a client a short-lived, signed upload form. The Lambda signs it with its own permissions and embeds rules (max size, allowed content type, exact key). The client then uploads straight to S3, so large files never pass through API Gateway (10 MB limit) or Lambda (6 MB payload limit). Interview line: "the control plane authorizes, S3 carries the bytes."
+* **Presigned POST (why images skip the API):** S3 can hand a client a short-lived, signed upload form. The Lambda signs it with its own permissions and embeds rules (max size, allowed content type, exact key). The client then uploads straight to S3, so large files never pass through API Gateway (10 MB limit) or Lambda (6 MB payload limit). Interview line: "the control plane authorizes, S3 carries the bytes."
+* **SSIM and deviation:** SSIM (structural similarity) compares two images in local windows (here 7x7 on equalized grayscale) and returns 1.0 for identical images. The business thresholds (0.16 / 0.20) are on the *deviation*, so deviation = 1 - SSIM. Higher deviation means the red- and blue-light photos differ more.
+* **Lambda size limits and what they force:** 250 MB unzipped / 50 MB direct zip upload. OpenCV + scikit-image alone is 441 MB, so either use a container image (up to 10 GB, adds ECR + Docker) or replace the heavy libraries. We replaced them and proved equivalence numerically (SSIM maths matches scikit-image to ~1e-16; identical end-to-end for same-size pairs).
+* **Terraform `moved` blocks:** Renaming a resource label normally looks like destroy + create. A `moved` block tells Terraform it is the same object, so the live API Gateway route was relabelled in state with no downtime.
+* **BOLA (Broken Object Level Authorization):** Every object query filters by the calling user's id. Returning 404 for both "missing" and "not yours" avoids leaking which ids exist.
 
-  * **SSIM and deviation**
-  SSIM (structural similarity) compares two images in local windows (here 7x7 on equalized grayscale) and returns 1.0 for identical images. The business thresholds (0.16 / 0.20) are on the *deviation*, so deviation = 1 - SSIM. Higher deviation means the red- and blue-light photos differ more.
-
-  * **Lambda size limits and what they force**
-  250 MB unzipped / 50 MB direct zip upload. OpenCV + scikit-image alone is 441 MB, so either use a container image (up to 10 GB, adds ECR + Docker) or replace the heavy libraries. We replaced them and proved equivalence numerically (SSIM maths matches scikit-image to ~1e-16; identical end-to-end for same-size pairs).
-
-  * **Terraform `moved` blocks**
-  Renaming a resource label normally looks like destroy + create. A `moved` block tells Terraform it is the same object, so the live API Gateway route was relabelled in state with no downtime.
-
-  * **BOLA (Broken Object Level Authorization)**
-  Every object query filters by the calling user's id. Returning 404 for both "missing" and "not yours" avoids leaking which ids exist.
+### Frontend & browser security
+* **Static site hosting (S3 + CloudFront):** The page is plain files in a private bucket; CloudFront serves them over HTTPS. There is no server to run or patch, and cost is ~$0 at this scale.
+* **OAC (Origin Access Control):** Lets CloudFront sign its requests to a private S3 bucket. The bucket policy trusts only that one distribution (`AWS:SourceArn`), so the files are public through CloudFront and nowhere else. It replaces the older Origin Access Identity.
+* **CSP (Content Security Policy):** A response header telling the browser which origins may supply scripts, styles, images and connections. With `script-src 'self'`, an injected or inline script is blocked, which limits what an XSS bug can do. Our page needs no inline code, so the policy can be strict.
+* **CORS:** A browser rule, not a server firewall. The server states which page origin may read its responses. Locking `allow_origins` to the CloudFront domain stops other websites' scripts from using a logged-in doctor's browser against the API. It does not stop `curl`, which is why the JWT authorizer still matters.
+* **HSTS:** A header telling the browser to use HTTPS only for this site for a period of time.
+* **SRP in the browser:** The Cognito SDK does the SRP maths in JavaScript, so the password never leaves the page. The resulting tokens are kept in memory only: XSS cannot read them from storage later, at the cost that a reload logs the user out.
+* **Terraform `fileset` + `aws_s3_object`:** Uploads every file in `frontend/` on `terraform apply`, so deploying the site is the same action as deploying infrastructure.
+* **Collapsing multi-select values:** The rules table has one value for "more than one" (`Multiple symptoms` etc.), so the UI maps two or more ticks to that value. The rule is inferred from the table and pending confirmation against the original app.

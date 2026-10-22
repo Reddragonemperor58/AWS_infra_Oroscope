@@ -1,0 +1,99 @@
+{
+ "ulcer": [
+  "Irregular <1cm, <2 Weeks",
+  "Irregular <1cm, >2 Weeks",
+  "Irregular >1cm, <2 Weeks",
+  "Irregular >1cm, >2 Weeks",
+  "No Abnormality Detected",
+  "Round Ulcer"
+ ],
+ "patch": [
+  "No Abnormality Detected",
+  "Red AND White Patch",
+  "Red Patch",
+  "Red Patch with white lines",
+  "White Patch"
+ ],
+ "growth": [
+  "Irregular Growth <1cm",
+  "Irregular Growth >1cm",
+  "No Abnormality Detected",
+  "Round Growth"
+ ],
+ "mucosal_condition": [
+  "Marble Appearance",
+  "No Abnormality Detected"
+ ],
+ "sharp_objects": [
+  "Detected",
+  "Not detected"
+ ],
+ "pigmentation": [
+  "Dark Pigmentation",
+  "No Abnormality Detected"
+ ],
+ "symptoms": [
+  "Blanching",
+  "Burning",
+  "Difficulty in opening the mouth",
+  "Multiple symptoms",
+  "None",
+  "No Symptoms",
+  "Pain",
+  "Redness",
+  "Swelling"
+ ],
+ "habits": [
+  "Alcohol",
+  "Multiple habits",
+  "No Habits",
+  "Pan Chewing",
+  "Smoking",
+  "Spicy Foods",
+  "Tobacco Chewing"
+ ],
+ "oral_mapping": [
+  "Buccal Mucosa",
+  "Buccal Sulcus",
+  "Dorsum of Tongue",
+  "Floor of the Mouth",
+  "Gingiva",
+  "Labial Mucosa",
+  "Lateral Tongue",
+  "Lips",
+  "Multiple areas",
+  "Palate",
+  "Retromolar Area"
+ ],
+ "provisional_diagnosis": [
+  "APTHOUS STOMATITIS",
+  "APTHOUS ULCER",
+  "APTHOUS ULCER ",
+  "BURNING MOUTH SYNDROME",
+  "CANDIDIASIS",
+  "CARCINOMA IN SITU",
+  "FIBRO EPITHELIAL POLYP",
+  "FIBROMA",
+  "FRICTIONAL KERATOSIS",
+  "INFLAMMATORY LESION",
+  "Irritation Fibroma",
+  "IRRITATION FIBROMA",
+  "LINEA ALBA",
+  "NO ABNORMALITY DETECTED",
+  "ORAL LEUKOPLAKIA",
+  "ORAL LICHEN PLANUS",
+  "ORAL SQUAMOUS CELL CARCINOMA",
+  "OSMF",
+  " Speckled Leukoplakia",
+  "Speckled Leukoplakia",
+  " SPECKLED LEUKOPLAKIA",
+  "SPECKLED LEUKOPLAKIA",
+  "Squamous Papilloma",
+  "SQUAMOUS PAPILLOMA",
+  "TOBACCO POUCH KERATOSIS",
+  "Traumatic Ulcer",
+  "TRAUMATIC ULCER",
+  "VARIABLE DIAGNOSIS",
+  "VERRUCOUS LEUKOPLAKIA"
+ ]
+}

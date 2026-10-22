@@ -115,8 +115,8 @@ A clean rejection (a real HTTP status your own code returned, e.g. `401` with a 
 ---
 
 ## Packaging the Control-Plane Lambda
-See ‘Build and deploy the Lambda’ below
-`--only-binary=:all:` is required, not optional — without it, pip may silently fall back to compiling a package from source using your local toolchain, producing a binary built for your machine instead of Lambda's, defeating the whole point of `--platform`.
+See "Build and deploy the Lambda" below; `build_lambda.sh` does the packaging.
+Inside it, `--only-binary=:all:` is required, not optional — without it, pip may silently fall back to compiling a package from source using your local toolchain, producing a binary built for your machine instead of Lambda's, defeating the whole point of `--platform`.
 
 ---
 
@@ -159,6 +159,9 @@ Skipping `create_type=False` causes SQLAlchemy to attempt creating the type a se
 - Postgres `DatabaseName` must be letters, numbers, and underscores only — **no hyphens**.
 - Terraform only prompts `yes/no` for backend (state location) changes — not for provider version bumps or plain resource changes. Both proceed silently if the plan looks otherwise correct.
 - Never change a live resource's `name` argument once applied if other live resources reference it (e.g. a DB subnet group or security group attached to a running Aurora cluster) — many AWS resource identifiers are immutable, forcing a destroy-and-recreate. Only `tags` are reliably safe to change on an already-applied resource.
+- The Data API cannot return Postgres `CHAR` columns (`UnsupportedResultException`); cast them in the query, e.g. `confdeltype::text`.
+- The database name is `oroscope_aurora` (not `oroscope`): `database "oroscope" does not exist` means the wrong `--database`.
+- `terraform fmt` only rewrites formatting; `terraform validate` checks syntax and references. Neither changes infrastructure.
 - A route returning a generic internal error with *no* CloudWatch log entry
   at all for that Lambda usually means `aws_lambda_permission` is missing —
   API Gateway was never granted permission to invoke the function. This looks
@@ -184,6 +187,33 @@ terraform apply
 - boto3 is deliberately left out of the zip (the Lambda runtime provides it).
 - **Two clones of the repo exist (Windows laptop + Linux).** Always `git pull` before editing; a stale clone caused a broken `main.py` once.
 
+## Deploy the frontend
+
+Edit files in `frontend/`, then:
+```bash
+cd infra && terraform plan && terraform apply
+terraform output -raw frontend_url
+```
+Terraform uploads the changed files (`no-cache`; CloudFront caching is disabled), so a hard refresh (Ctrl+Shift+R) shows the change. Never create `frontend/config.js`: Terraform generates it from outputs. After the form fields or the rules table change, re-run `python3 scripts/export_clinical_options.py` (writes `frontend/options.json` from the live database) and commit the result.
+
+## Test users (Cognito)
+
+Doctors are admin-created only (ADR 0004):
+```bash
+aws cognito-idp list-users --user-pool-id <pool id> --region ap-south-2
+aws cognito-idp admin-create-user --user-pool-id <pool id> --username <email> --region ap-south-2
+aws cognito-idp admin-set-user-password --user-pool-id <pool id> --username <email> --password '<password>' --permanent --region ap-south-2
+```
+A new Cognito user also needs a row in `users` (ADR 0010: no automatic sync yet), with `id` set to the user's Cognito `sub`.
+
+## Scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/test_optical_flow.py` | End-to-end optical test (needs exported `API_URL` and `ID_TOKEN`) |
+| `scripts/test_clinical_lookup.py` | Checks that the lookup is case- and whitespace-insensitive on provisional_diagnosis |
+| `scripts/export_clinical_options.py` | Builds `frontend/options.json` (dropdown values) from the database |
+
 ## End-to-end test of the optical flow
 
 ```bash
@@ -206,19 +236,30 @@ Expected: every step 200/204, final line `MATCH` (API SSIM equals a local recomp
 | `409` on PATCH optical | Images not uploaded yet; request upload URLs and upload both |
 | `422` on PATCH optical | An uploaded file is not a decodable image |
 | `warning: ... not in the scoring sheet` | Provisional diagnosis name has no scoring row; `final_score` is cleared and status returns to `pending` |
+| Browser console: CORS error on an API call | `allow_origins` does not match the page origin. Open the `frontend_url` address, not another domain |
+| Browser console: CORS error on the S3 upload | Images bucket CORS missing the CloudFront origin (`aws_s3_bucket_cors_configuration.images`) |
+| Browser console: CSP violation | Something inline or from another host was added; keep scripts and styles as files in `frontend/` |
+| Login fails with the right password | User missing or password reset: check `list-users`, re-run `admin-set-user-password` |
+| Page loads but is unstyled / old | Hard refresh (Ctrl+Shift+R); confirm `terraform apply` uploaded the file |
+| Adding a patient fails after a fresh login | The Cognito user has no row in `users` (ADR 0010) |
 | Terraform shows route/Lambda destroys | Stop; do not apply. Compare against `get-routes` and state |
 
 ## Clean up test data
 
-Test patients are named "Optical Test". Delete them (diagnoses cascade) through the Data API:
+Test patients are named "Optical Test" or "Lookup Test" (and the UI test patients you add by hand). Delete them (diagnoses cascade) through the Data API:
 ```bash
 aws rds-data execute-statement --region ap-south-2 --database oroscope_aurora \
   --resource-arn "$(terraform -chdir=infra output -raw aurora_cluster_arn)" \
   --secret-arn "$(terraform -chdir=infra output -raw aurora_secret_arn)" \
-  --sql "DELETE FROM patients WHERE name = 'Optical Test';"
+  --sql "DELETE FROM patients WHERE name IN ('Optical Test', 'Lookup Test');"
 ```
 Images expire from S3 automatically after 30 days.
 
 ## Open items
-- Dentist to confirm: aliases IRRITATION FIBROMA -> Fibroma and APTHOUS STOMATITIS -> Apthous Ulcer; the 7 scored diagnoses with no clinical_rules rows.
-- `clinical_rules.provisional_diagnosis` has inconsistent case/whitespace; scoring matching ignores both, the rules lookup does not (verify before relying on it for non-uppercase names).
+- Dentist to confirm: aliases IRRITATION FIBROMA -> Fibroma and APTHOUS STOMATITIS -> Apthous Ulcer (**unconfirmed**); the 7 scored diagnoses with no `clinical_rules` rows (they can be picked in the dropdown and give "no rule matches" on lookup).
+- Confirm with the original app that two or more ticks should collapse to `Multiple symptoms` / `Multiple habits` / `Multiple areas` (confirmed working only for oral mapping against the table).
+- Image retention (30 days) is a placeholder; confirm with the clinic.
+- `clinical_rules.provisional_diagnosis` has inconsistent case/whitespace in the source; both scoring and the rules lookup now ignore it (lookup compares `upper(btrim())`; zero conflicts proven). `rules_engine.py` is a database lookup only.
+- Cognito-to-`users` sync is still manual (ADR 0010).
+- Not built: DL inference, SQS/SNS async processing.
+- Add an AWS Budgets alert.

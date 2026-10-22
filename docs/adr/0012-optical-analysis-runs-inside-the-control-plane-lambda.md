@@ -16,7 +16,7 @@ Keep a single Lambda. Re-implement the same algorithm with numpy + Pillow (`app/
   3 px border cropped). Verified against scikit-image: max difference ~5e-16.
 - Grayscale uses OpenCV's fixed-point BGR2GRAY formula; histogram equalisation reproduces
   `cv2.equalizeHist`; EXIF orientation is applied (OpenCV's imdecode does this, Pillow does not).
-- Control-plane zip: 109 MB unzipped / 32 MB zipped. boto3 is not bundled (runtime provides it).
+- Control-plane zip: ~108 MB unzipped / 32 MB zipped. boto3 is not bundled (runtime provides it).
 
 Images go browser -> S3 through presigned POST (10 MB cap, image/* only), not through API Gateway
 (10 MB limit) or Lambda (6 MB payload). S3 keys are generated server-side and stored on the
@@ -35,4 +35,6 @@ Diagnosis = 0 in all bands, dentist-confirmed).
   inference, which is skipped in this prototype.
 - `provisional_diagnosis` is request input to the optical step while the DL step is skipped.
 - Bucket objects expire after 30 days (placeholder retention - confirm with the clinic).
+- Scoring table: 81 entries (27 diagnoses x 3 bands). Aliases IRRITATION FIBROMA -> Fibroma and APTHOUS STOMATITIS -> Apthous Ulcer are unconfirmed.
+- Image order: image 1 is the red-light photo, image 2 the blue-light photo (confirmed).
 - Lambda: 1024 MB, 30 s timeout (12 MP pair ~4 s locally).

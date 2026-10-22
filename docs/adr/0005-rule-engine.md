@@ -1,5 +1,8 @@
 # ADR 0005: Rules Engine Data Storage
 
+## Status
+Superseded by ADR 0011 for the clinical rules (now an Aurora table). Still valid in general for small, static data.
+
 ## Context
 Stage 3 requires implementing the clinical diagnosis and optical scoring rules engine. The original application relied on external Excel/CSV files. We need to decide where this ruleset lives in the cloud architecture. We do not yet possess the final, production clinical data, meaning the system will be built using placeholder data to verify the schema and matching logic.
 

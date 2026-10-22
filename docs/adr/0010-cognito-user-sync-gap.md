@@ -1,5 +1,8 @@
 # ADR 0010: Cognito-to-Database User Sync Gap
 
+## Status
+Open. Still a manual step as of the frontend release (ADR 0013).
+
 ## Context
 A real Cognito-authenticated identity — a genuine JWT, correctly validated
 by API Gateway — can exist with no corresponding row in `users`, since
@@ -26,3 +29,5 @@ that silently doesn't fire is worse than an honest manual step.
 ## Consequences
 Every real doctor account currently needs a manual database insert alongside
 Cognito creation. Must be resolved before this becomes multi-user.
+## Update
+The browser frontend (ADR 0013) makes this visible: a freshly created Cognito doctor can log in but gets an error on their first patient call until a `users` row (id = the Cognito `sub`) is inserted. Candidate fixes: confirm whether Post-Confirmation fires for admin-created users, or create the `users` row lazily on the first authenticated request.

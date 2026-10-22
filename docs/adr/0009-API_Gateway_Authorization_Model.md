@@ -1,13 +1,15 @@
 # ADR 0009: API Gateway Authorization Model
 
+## Status
+Accepted. The CORS gap below was closed by ADR 0013.
+
 ## Context
 Routes need to reject unauthenticated requests before reaching the Lambda,
 using the Cognito User Pool and App Client from Stage 2.
 
 ## Decision
 HTTP API (v2) native JWT authorizer, applied per-route rather than globally.
-`/health` is explicitly `authorization_type = "NONE"`; `/patients` and
-`/diagnoses/clinical-match` require `"JWT"` against the Cognito authorizer.
+`/health` is explicitly `authorization_type = "NONE"`; `/patients` and every diagnosis route (`/diagnoses/...`; seven routes in total, including `/health`) require `"JWT"` against the Cognito authorizer.
 
 ## Rationale
 - JWT signature/expiry/issuer/audience validation happens at the API Gateway
@@ -20,7 +22,7 @@ HTTP API (v2) native JWT authorizer, applied per-route rather than globally.
   never wake the Lambda at all.
 
 ## Consequences
-- `cors_configuration.allow_origins` is currently `["*"]` — a deliberate,
+- (Resolved, ADR 0013: `allow_origins` is now the CloudFront origin only.) It was `["*"]` — a deliberate,
   temporary placeholder. **Must be locked to the real frontend domain before
   any real user traffic**, or any website can call this API cross-origin.
 - `aws_lambda_permission` is a separate, easy-to-forget grant — without it,
