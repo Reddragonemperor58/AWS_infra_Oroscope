@@ -92,11 +92,31 @@ resource "aws_apigatewayv2_route" "optical_analysis" {
   authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
 }
 
+variable "api_rate_limit" {
+  description = "Steady requests per second allowed across the whole API"
+  type        = number
+  default     = 20
+}
+
+variable "api_burst_limit" {
+  description = "Short burst of requests allowed above the steady rate"
+  type        = number
+  default     = 40
+}
+
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.main.id
   name        = "$default"
   auto_deploy = true
-  tags        = local.common_tags
+
+  # Caps request rate for the whole API. Requests over the cap get HTTP 429 instead of
+  # running Lambda, so a runaway script cannot run up the bill.
+  default_route_settings {
+    throttling_rate_limit  = var.api_rate_limit
+    throttling_burst_limit = var.api_burst_limit
+  }
+
+  tags = local.common_tags
 }
 
 resource "aws_lambda_permission" "api_gateway" {

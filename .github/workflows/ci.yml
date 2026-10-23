@@ -1,0 +1,68 @@
+# Runs on every push and pull request: the Python tests, then Terraform format and validity checks.
+# It uses no AWS credentials, so it cannot change or even read your AWS account.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/control-plane
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: services/control-plane/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest httpx
+      - name: Run tests
+        run: python -m pytest app/tests -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax-check the page scripts
+        run: |
+          for f in frontend/app.js frontend/api.js frontend/auth.js; do
+            node --check "$f"
+          done
+      - name: Page must not contain inline scripts (the CSP would block them)
+        run: |
+          if grep -nE "<script[^>]*>[^<]+</script>|onclick=|onload=" frontend/index.html; then
+            echo "Inline script found in index.html"; exit 1
+          fi
+      - name: config.js must not be committed (Terraform generates it)
+        run: test ! -e frontend/config.js
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Format check
+        run: terraform fmt -check -recursive
+      - name: Create a placeholder Lambda zip (the real one is built locally)
+        run: touch ../services/control-plane/fastapi_backend.zip
+      - name: Init without the remote state
+        run: terraform init -backend=false -input=false
+      - name: Validate
+        run: terraform validate
