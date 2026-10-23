@@ -5,7 +5,8 @@
   const Auth = window.OroscopeAuth;
   const Api = window.OroscopeApi;
   const app = document.getElementById("app");
-  const state = { email: null, patients: [], patient: null, diagnosis: null, options: null, previews: [] };
+  const state = { email: null, patients: [], patient: null, diagnosis: null, options: null, previews: [],
+    query: "", hasMore: false, listSeq: 0 };
 
   // value = what the API receives (matches the clinical_rules spelling; scoring ignores case/spaces).
   // The first 22 exist in the rules table; the last 7 are scored but have no rules (lookup returns 404).
@@ -105,7 +106,7 @@
   const waiting = () => setStatus("Waking the database after a period of inactivity, retrying...", "info");
 
   // ---------- screens ----------
-  function renderLogin(message) {
+  function renderLogin(message, kind) {
     app.replaceChildren();
     statusEl = h("p", { class: "status", role: "status" });
     const email = h("input", { type: "email", name: "email", autocomplete: "username", required: true });
@@ -125,15 +126,69 @@
           });
         },
       }, field("Email", email), field("Password", password), btn),
+      h("p", {}, h("button", { type: "button", class: "link", onclick: () => renderForgot(email.value.trim()) }, "Forgot password?")),
       statusEl));
-    if (message) setStatus(message, "error");
+    if (message) setStatus(message, kind || "error");
+  }
+
+  function renderForgot(prefill) {
+    app.replaceChildren();
+    statusEl = h("p", { class: "status", role: "status" });
+    const email = h("input", { type: "email", name: "email", autocomplete: "username", required: true, value: prefill || "" });
+    const code = h("input", { type: "text", name: "code", inputmode: "numeric", autocomplete: "one-time-code", required: true });
+    const pw = h("input", { type: "password", name: "new-password", autocomplete: "new-password", required: true });
+    const pw2 = h("input", { type: "password", name: "confirm-password", autocomplete: "new-password", required: true });
+    const sendBtn = h("button", { type: "submit" }, "Send code");
+    const saveBtn = h("button", { type: "submit" }, "Set new password");
+    const step2 = h("form", {
+      hidden: true,
+      onsubmit: (ev) => {
+        ev.preventDefault();
+        run(saveBtn, async () => {
+          if (pw.value !== pw2.value) throw new Error("The two passwords do not match.");
+          await Auth.confirmPassword(email.value.trim(), code.value.trim(), pw.value);
+          renderLogin("Password updated. Log in with your new password.", "info");
+        });
+      },
+    }, field("Code from the email", code), field("New password", pw), field("Repeat new password", pw2), saveBtn);
+    app.append(h("section", { class: "card narrow" },
+      h("h1", {}, "Reset password"),
+      h("form", {
+        onsubmit: (ev) => {
+          ev.preventDefault();
+          run(sendBtn, async () => {
+            await Auth.forgotPassword(email.value.trim());
+            step2.hidden = false;
+            setStatus("If this email has an account, a code has been sent. Enter it below with a new password.", "info");
+          });
+        },
+      }, field("Email", email), sendBtn),
+      step2,
+      h("p", {}, h("button", { type: "button", class: "link", onclick: () => renderLogin() }, "Back to log in")),
+      statusEl));
   }
 
   function doLogout(message) {
     Auth.logout();
-    Object.assign(state, { email: null, patients: [], patient: null, diagnosis: null });
+    Object.assign(state, { email: null, patients: [], patient: null, diagnosis: null, query: "", hasMore: false });
     clearPreviews();
     renderLogin(message);
+  }
+
+  const PAGE_SIZE = 50;
+
+  // Shows an error from a background action; a 401 goes back to the login screen.
+  function fail(err) {
+    if (err instanceof Api.ApiError && err.status === 401) { doLogout("Session expired. Please log in again."); return; }
+    setStatus((err && err.message) || "Something went wrong.", "error");
+  }
+
+  // The server stores UTC timestamps without a zone marker; add one so the browser converts to local time.
+  function fmtDate(value) {
+    if (!value) return "-";
+    const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : value + "Z";
+    const d = new Date(iso);
+    return isNaN(d) ? String(value) : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   }
 
   async function renderMain() {
@@ -150,55 +205,210 @@
       if (!res.ok) throw new Error("Could not load form options.");
       state.options = await res.json();
     }
-    await loadPatients();
+    renderPatientsShell();
+    await loadPatients(true);
   }
 
-  async function loadPatients() {
-    setStatus("Loading patients...", "info");
-    state.patients = await Api.get("/patients", waiting);
-    setStatus("");
-    renderPatients();
-  }
+  // Built once so the search box keeps focus while the list below it refreshes.
+  function renderPatientsShell() {
+    const search = h("input", {
+      type: "search", name: "q", maxlength: "100", placeholder: "Search by name or phone", "aria-label": "Search patients",
+    });
+    let timer;
+    search.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { state.query = search.value.trim(); loadPatients(true).catch(fail); }, 300);
+    });
+    state.searchEl = search;
+    state.listEl = h("div", {});
 
-  function renderPatients() {
     const name = h("input", { type: "text", name: "name", maxlength: "100", required: true });
     const age = h("input", { type: "number", name: "age", min: "0", max: "120" });
     const gender = select("gender", ["Male", "Female", "Other"]);
     gender.required = false;
     const phone = h("input", { type: "tel", name: "contact_number", maxlength: "20" });
     const btn = h("button", { type: "submit" }, "Add patient");
-    const list = state.patients.length
+    const addForm = h("form", {
+      onsubmit: (ev) => {
+        ev.preventDefault();
+        run(btn, async () => {
+          const body = { name: name.value.trim() };
+          if (age.value !== "") body.age = parseInt(age.value, 10);
+          if (gender.value) body.gender = gender.value;
+          if (phone.value.trim()) body.contact_number = phone.value.trim();
+          const created = await Api.post("/patients", body, waiting);
+          addForm.reset();
+          search.value = "";
+          state.query = "";
+          await loadPatients(true);
+          selectPatient(created, true);
+        });
+      },
+    }, h("div", { class: "grid" },
+      field("Name", name), field("Age", age), field("Gender", gender), field("Contact number", phone)), btn);
+
+    state.patientsEl.replaceChildren(h("section", { class: "card" },
+      h("h2", {}, "Patients"), search, state.listEl,
+      h("details", { class: "more" }, h("summary", {}, "New patient"), addForm)));
+  }
+
+  async function loadPatients(reset) {
+    if (reset) state.patients = [];
+    const seq = ++state.listSeq; // ignore an older response that arrives after a newer search
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(state.patients.length) });
+    if (state.query) params.set("q", state.query);
+    setStatus("Loading patients...", "info");
+    const page = await Api.get("/patients?" + params.toString(), waiting);
+    if (seq !== state.listSeq) return;
+    state.patients = state.patients.concat(page);
+    state.hasMore = page.length === PAGE_SIZE;
+    setStatus("");
+    renderPatientList();
+  }
+
+  function renderPatientList() {
+    const items = state.patients.length
       ? h("ul", { class: "list" }, state.patients.map((p) =>
         h("li", {}, h("button", {
           type: "button", class: "link" + (state.patient && state.patient.id === p.id ? " active" : ""),
           onclick: () => selectPatient(p),
-        }, p.name + (p.age != null ? " (" + p.age + ")" : "")))))
-      : h("p", { class: "muted" }, "No patients yet. Add one below.");
-    state.patientsEl.replaceChildren(h("section", { class: "card" },
-      h("h2", {}, "Patients"), list,
-      h("form", {
-        onsubmit: (ev) => {
-          ev.preventDefault();
-          run(btn, async () => {
-            const body = { name: name.value.trim() };
-            if (age.value !== "") body.age = parseInt(age.value, 10);
-            if (gender.value) body.gender = gender.value;
-            if (phone.value.trim()) body.contact_number = phone.value.trim();
-            const created = await Api.post("/patients", body, waiting);
-            state.patients.push(created);
-            selectPatient(created);
-          });
-        },
-      }, h("h3", {}, "New patient"), h("div", { class: "grid" },
-        field("Name", name), field("Age", age), field("Gender", gender), field("Contact number", phone)), btn)));
+        }, p.name + (p.age != null ? " (" + p.age + ")" : "") + (p.contact_number ? " - " + p.contact_number : "")))))
+      : h("p", { class: "muted" }, state.query ? "No patients match your search." : "No patients yet. Add one below.");
+    const more = state.hasMore
+      ? h("button", {
+        type: "button", class: "secondary",
+        onclick: (ev) => run(ev.currentTarget, () => loadPatients(false)),
+      }, "Load more")
+      : null;
+    // replaceChildren turns a null argument into the text "null", so drop the missing button
+    state.listEl.replaceChildren(...[items, more].filter(Boolean));
   }
 
-  function selectPatient(p) {
+  function selectPatient(p, startNew) {
     state.patient = p;
     state.diagnosis = null;
     clearPreviews();
-    renderPatients();
-    renderClinicalForm();
+    renderPatientList();
+    renderPatientPanel();
+    loadHistory();
+    if (startNew) renderClinicalForm();
+  }
+
+  function renderPatientPanel() {
+    state.summaryEl = h("div", {});
+    state.historyEl = h("div", {});
+    state.workEl = h("div", {});
+    renderPatientSummary();
+    state.diagnosisEl.replaceChildren(
+      h("section", { class: "card" },
+        state.summaryEl,
+        h("h3", {}, "Case history"), state.historyEl,
+        h("p", {}, h("button", { type: "button", onclick: () => renderClinicalForm() }, "Start new diagnosis"))),
+      state.workEl);
+  }
+
+  function renderPatientSummary() {
+    const p = state.patient;
+    const name = h("input", { type: "text", name: "name", maxlength: "100", required: true, value: p.name });
+    const age = h("input", { type: "number", name: "age", min: "0", max: "120", value: p.age != null ? String(p.age) : "" });
+    const gender = select("gender", ["Male", "Female", "Other"]);
+    gender.required = false;
+    gender.value = p.gender || "";
+    const phone = h("input", { type: "tel", name: "contact_number", maxlength: "20", value: p.contact_number || "" });
+    const saveBtn = h("button", { type: "submit" }, "Save changes");
+    const editForm = h("form", {
+      onsubmit: (ev) => {
+        ev.preventDefault();
+        run(saveBtn, async () => {
+          const body = {
+            name: name.value.trim(),
+            age: age.value !== "" ? parseInt(age.value, 10) : null,
+            gender: gender.value || null,
+            contact_number: phone.value.trim() || null,
+          };
+          const updated = await Api.patch("/patients/" + p.id, body, waiting);
+          state.patient = updated;
+          const idx = state.patients.findIndex((x) => x.id === updated.id);
+          if (idx >= 0) state.patients[idx] = updated;
+          renderPatientList();
+          renderPatientSummary();
+          setStatus("Patient details saved.", "info");
+        });
+      },
+    }, h("div", { class: "grid" },
+      field("Name", name), field("Age", age), field("Gender", gender), field("Contact number", phone)), saveBtn);
+    state.summaryEl.replaceChildren(
+      h("h2", {}, p.name),
+      h("dl", {},
+        h("dt", {}, "Age"), h("dd", {}, p.age != null ? String(p.age) : "-"),
+        h("dt", {}, "Gender"), h("dd", {}, p.gender || "-"),
+        h("dt", {}, "Contact"), h("dd", {}, p.contact_number || "-")),
+      h("details", { class: "more" }, h("summary", {}, "Edit details"), editForm));
+  }
+
+  async function loadHistory() {
+    const patient = state.patient;
+    if (!patient) return;
+    state.historyEl.replaceChildren(h("p", { class: "muted" }, "Loading history..."));
+    try {
+      const rows = await Api.get("/patients/" + patient.id + "/diagnoses?limit=50", waiting);
+      if (state.patient !== patient) return; // the doctor picked someone else meanwhile
+      if (!rows.length) {
+        state.historyEl.replaceChildren(h("p", { class: "muted" }, "No cases yet."));
+        return;
+      }
+      state.historyEl.replaceChildren(h("ul", { class: "list" }, rows.map((d) => {
+        const result = d.final_score != null ? d.final_score + " / 5" : (d.status === "complete" ? "complete" : "not finished");
+        return h("li", {}, h("button", { type: "button", class: "link", onclick: () => showDiagnosis(d.id) },
+          fmtDate(d.created_at) + " - " + (d.provisional_diagnosis || "provisional diagnosis not recorded") + " - " + result));
+      })));
+    } catch (err) {
+      if (state.patient !== patient) return;
+      state.historyEl.replaceChildren(h("p", { class: "status error" }, "Could not load the case history."));
+      fail(err);
+    }
+  }
+
+  async function showDiagnosis(id) {
+    setStatus("Loading case...", "info");
+    try {
+      const d = await Api.get("/diagnoses/" + id, waiting);
+      setStatus("");
+      clearPreviews();
+      state.diagnosis = null;
+      const num = (x, n) => (typeof x === "number" ? x.toFixed(n) : "-");
+      const rows = [
+        ["Date", fmtDate(d.created_at)],
+        ["Provisional diagnosis", d.provisional_diagnosis || "Not recorded"],
+        ["Ulcer", d.ulcer], ["Patch", d.patch], ["Growth", d.growth],
+        ["Mucosal condition", d.mucosal_condition], ["Sharp objects", d.sharp_objects],
+        ["Pigmentation", d.pigmentation], ["Symptoms", d.symptoms], ["Habits", d.habits],
+        ["Oral mapping", d.oral_mapping],
+        ["Differential diagnosis", d.rules_match_result || "Not looked up"],
+        ["Advice", d.advise || "-"],
+        ["Image analysis band", d.image_analysis_band || "Not analysed"],
+        ["Deviation index", num(d.optical_deviation_index, 4)],
+        ["Final score", d.final_score != null ? d.final_score + " / 5" : "Not available"],
+        ["Status", d.status],
+      ];
+      const photo = (url, label) => {
+        const box = h("div", {}, h("p", { class: "muted" }, label));
+        if (!url) { box.append(h("p", { class: "muted" }, "No photo.")); return box; }
+        const img = h("img", { class: "preview", alt: label, src: url });
+        img.addEventListener("error", () => img.replaceWith(h("p", { class: "muted" }, "Photo is no longer available.")));
+        box.append(img);
+        return box;
+      };
+      state.workEl.replaceChildren(h("section", { class: "card" },
+        h("h2", {}, "Case from " + fmtDate(d.created_at)),
+        h("dl", {}, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v == null || v === "" ? "-" : String(v))])),
+        h("h3", {}, "Photos"),
+        h("div", { class: "grid" }, photo(d.image_1_url, "Image 1 (red light)"), photo(d.image_2_url, "Image 2 (blue light)")),
+        h("p", { class: "muted" }, "Photos are kept for a limited time and may no longer be available for older cases.")));
+      state.workEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      fail(err);
+    }
   }
 
   function renderClinicalForm() {
@@ -215,8 +425,10 @@
     // Steps 2-3 live in their own container so re-submitting the findings replaces them
     // (a fresh diagnosis) instead of stacking a second copy underneath.
     state.stepsEl = h("div", {});
-    state.diagnosisEl.replaceChildren(h("section", { class: "card" },
-      h("h2", {}, "Diagnosis for " + state.patient.name),
+    clearPreviews();
+    state.diagnosis = null;
+    state.workEl.replaceChildren(h("section", { class: "card" },
+      h("h2", {}, "New diagnosis for " + state.patient.name),
       h("h3", {}, "1. Clinical findings"),
       h("form", {
         onsubmit: (ev) => {
@@ -294,6 +506,7 @@
             { provisional_diagnosis: provisional.value }, waiting);
           setStatus("");
           renderOpticalResult(opticalOut, r);
+          loadHistory();
         });
       },
     }, h("div", { class: "grid" },

@@ -79,6 +79,8 @@ Lambda runtime, Mangum correctly parses a full API Gateway v2 event, and the
 auth-rejection path returns a clean 401 rather than an unhandled exception
 when authorizer claims are absent.
 
+**Records API (ADR 0014):** `app/records.py` is a FastAPI router (included from `main.py`) holding the read and edit side of a doctor's work: `GET /patients` (A to Z, optional `q` search by name or phone, `limit` 1 to 200, `offset`), `GET` and `PATCH /patients/{id}`, `GET /patients/{id}/diagnoses` (case history) and `GET /diagnoses/{id}` (case detail with photo links). Every query filters by the calling doctor; a missing record and another doctor's record both return 404. Photo links are presigned S3 GET URLs on the regional endpoint, valid for 10 minutes and generated on each request, so nothing long-lived is stored.
+
 **User provisioning (ADR 0010):** the first authenticated request from a new Cognito identity creates its `users` row from the verified `sub` and `email` claims (`INSERT ... ON CONFLICT DO NOTHING`). No manual insert is needed.
 
 ## Edge (API Gateway)
@@ -88,7 +90,7 @@ raw event is handed to Mangum unmodified, no request reshaping at this layer.
 A Cognito JWT authorizer validates token signature, expiry, issuer, and
 audience before Lambda invocation; unauthenticated requests never incur
 Lambda compute cost. Authorization is applied per-route: `/health` is
-intentionally open, all patient/diagnosis routes require a valid JWT.
+intentionally open, all patient/diagnosis routes (11 routes in total, including the four record routes in `infra/apigateway_records.tf`) require a valid JWT.
 
 **CORS:** `allow_origins` is exactly the CloudFront origin
 (`https://<distribution>.cloudfront.net`), set from Terraform. The images bucket
@@ -161,4 +163,6 @@ flowchart LR
 - **Login:** Cognito SRP in the browser against the public app client. Tokens are held in memory only (a reload logs out). The ID token is sent to API Gateway.
 - **Headers:** CSP (`default-src 'self'`, `script-src 'self'`, `style-src 'self'`, `connect-src` limited to Cognito, API Gateway and S3 in ap-south-2, `frame-ancestors 'none'`), HSTS, nosniff, X-Frame-Options DENY, no-referrer. The UI builds DOM nodes (never `innerHTML`) and uses no inline script or style.
 - **Form behaviour:** Symptoms, Habits and Oral mapping are checkbox groups. Two or more ticks are sent as `Multiple symptoms` / `Multiple habits` / `Multiple areas` (the values the rules table uses); the "none" values are exclusive. Image 1 is red light, image 2 is blue light. Re-submitting the findings starts a new diagnosis and replaces steps 2-3 on the page.
-- **Verified in a real browser:** login, patient create, clinical lookup, upload through S3 CORS, score. Open: the "Multiple ..." collapse rule is inferred from the table and still to be confirmed against the original app.
+- **Records screens (ADR 0014):** the patient list has a debounced search box and a Load more button (50 per page). Opening a patient shows editable details and a case history; opening a case shows its findings, advice, band, score and the two photos (a photo that has expired shows "Photo is no longer available."). The history refreshes after each new diagnosis. A "Forgot password" link uses Cognito's emailed code (the account needs a verified email address that can receive mail).
+- **Images in the browser:** the CSP `img-src` allows `https://s3.ap-south-2.amazonaws.com` so signed photo links can display.
+- **Verified in a real browser:** login, patient create, clinical lookup, upload through S3 CORS, score, search, history, case detail with photos, edit patient, forgot password. Open: the "Multiple ..." collapse rule is inferred from the table and still to be confirmed against the original app.

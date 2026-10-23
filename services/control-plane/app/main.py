@@ -18,6 +18,7 @@ from .models import User, Patient, Diagnosis, DiagnosisStatus
 from .rules_engine import get_differential_and_advise  # get_clinical_diagnosis no longer exists
 from .scoring_engine import get_band, get_final_score
 from . import optical
+from .records import router as records_router
 
 app = FastAPI(title="Oroscope Control Plane")
 
@@ -145,13 +146,6 @@ def create_patient(
     db.refresh(db_patient)
     return db_patient
 
-@app.get("/patients", response_model=List[PatientResponse])
-def list_patients(
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
-):
-    return db.query(Patient).filter(Patient.doctor_id == current_user.id).all()
-
 @app.post("/diagnoses/clinical-match", response_model=DiagnosisResponse)
 def clinical_match(
     request: ClinicalMatchRequest,
@@ -209,6 +203,7 @@ def run_clinical_lookup(
     if not result:
         raise HTTPException(status_code=404, detail="No matching clinical rule found.")
 
+    diagnosis.provisional_diagnosis = request.provisional_diagnosis
     diagnosis.rules_match_result = result["differential_diagnosis"]
     diagnosis.advise = result["advise"]
     db.commit()
@@ -293,6 +288,7 @@ def run_optical_analysis(
     band = get_band(deviation)
     final_score = get_final_score(request.provisional_diagnosis, deviation)
 
+    diagnosis.provisional_diagnosis = request.provisional_diagnosis
     diagnosis.optical_deviation_index = Decimal(str(round(deviation, 6)))
     warning = None
     diagnosis.final_score = final_score  # None on a lookup miss: clears any stale score
@@ -313,6 +309,8 @@ def run_optical_analysis(
         resized=result["resized"],
         warning=warning,
     )
+
+app.include_router(records_router)
 
 # --- MANGUM WRAPPER ---
 handler = Mangum(app)

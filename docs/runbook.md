@@ -219,6 +219,40 @@ No database step is needed: the `users` row is created automatically on the doct
 | `scripts/test_optical_flow.py` | End-to-end optical test (needs exported `API_URL` and `ID_TOKEN`) |
 | `scripts/test_clinical_lookup.py` | Checks that the lookup is case- and whitespace-insensitive on provisional_diagnosis |
 | `scripts/export_clinical_options.py` | Builds `frontend/options.json` (dropdown values) from the database |
+| `scripts/get_token.py` | Prints a doctor's Cognito ID token. Password comes from the `COGNITO_PASSWORD` environment variable, never a file or argument |
+| `scripts/test_records_flow.py` | Live test of patients, search, history, detail and photo links (19 checks; 5 more other-doctor checks when `ID_TOKEN_2` is set) |
+
+## Getting a token without typing the password into a command
+
+```bash
+read -s -p "Password: " COGNITO_PASSWORD; export COGNITO_PASSWORD; echo
+export ID_TOKEN=$(python scripts/get_token.py <email>)
+export API_URL="<api url>"
+python3 scripts/test_records_flow.py
+```
+For the other-doctor checks, create a second doctor and also `export ID_TOKEN_2=$(python scripts/get_token.py <second email>)`. If a password ever ends up in a command line, it is in the shell history: change it and clear the history.
+
+## Testing "Forgot password"
+
+The reset code is emailed by Cognito, so the doctor's email must be a real inbox and marked verified. `someone@example.com` will show "A password reset is not available for this account". For testing, use your own address with a plus suffix (`yourname+doc1@gmail.com` delivers to `yourname@gmail.com`) and create the doctor with `email_verified=true` as above. Cognito's built-in sender is capped at about 50 emails a day and looks generic; use SES before real clinics.
+
+## Alembic against Aurora (Data API)
+
+Run from the repository root (where `alembic.ini` is), after exporting the database URL:
+```bash
+export DATABASE_URL="postgresql+auroradataapi://:@/oroscope_aurora?aurora_cluster_arn=<cluster arn>&secret_arn=<secret arn>"
+alembic upgrade head
+alembic current          # expect 5e12d1392533 (head)
+```
+`script_location` errors mean you are in the wrong folder; `KeyError: 'url'` means `DATABASE_URL` is not exported.
+
+## Git Bash on Windows
+
+- `aws logs tail /aws/lambda/oroscope-dev-fastapi ...` fails because Git Bash rewrites the leading `/`. Prefix the command with `MSYS_NO_PATHCONV=1`.
+- `terraform output` only works inside `infra/` (or use `terraform -chdir=infra output`). Empty ARNs in an `aws rds-data` call mean you ran it from the wrong folder.
+- SQL typed at the prompt is run by bash, not the database. Wrap it in `aws rds-data execute-statement --sql "..."`.
+- pip `WinError 32` is a file lock; re-run the command.
+- Put `alert_email` in a git-ignored `infra/terraform.tfvars`, otherwise Terraform asks for it every time and a missing value would blank the budget alert.
 
 ## End-to-end test of the optical flow
 
@@ -234,7 +268,7 @@ Expected: every step 200/204, final line `MATCH` (API SSIM equals a local recomp
 
 | Symptom | Cause / fix |
 |---|---|
-| `404 {"message":"Not Found"}` | API Gateway route missing. `aws apigatewayv2 get-routes --api-id jy3bq91s6k --region ap-south-2 --query 'Items[].RouteKey'` should list 7 routes |
+| `404 {"message":"Not Found"}` | API Gateway route missing. `aws apigatewayv2 get-routes --api-id jy3bq91s6k --region ap-south-2 --query 'Items[].RouteKey'` should list 11 routes |
 | `401` | Missing/expired token (ID tokens last ~1 h); re-run `test_login.py` |
 | `503` + `Retry-After: 5` | Aurora auto-paused and resuming (scale-to-zero); retry in a few seconds |
 | `KeyError: 'ID_TOKEN'` | Variable set without `export` |
@@ -249,11 +283,15 @@ Expected: every step 200/204, final line `MATCH` (API SSIM equals a local recomp
 | Page loads but is unstyled / old | Hard refresh (Ctrl+Shift+R); confirm `terraform apply` uploaded the file |
 | `401` "Token has no email claim" | An access token was sent; the API needs the Cognito ID token |
 | `409` "email is already registered to a different account" | A Cognito user was deleted and recreated with the same email (new `sub`). Delete the stale `users` row for that email |
+| `500` on `GET /patients?q=...`, log says `syntax error at or near ":"` | `ILIKE ... ESCAPE '\'` reached the Data API, whose parser misreads the backslash. Search uses `strpos` instead (ADR 0014); do not reintroduce `ESCAPE` |
+| `NotAuthorizedException` from `get_token.py` | Wrong password, or the user's password was never set permanent (`admin-set-user-password --permanent`) |
+| `InvalidPasswordException` | The pool policy needs upper and lower case, digits, symbols and a long password (shorter ones were rejected in testing); check `password_policy` in the Cognito Terraform |
+| "Password reset is not available for this account" | The user has no verified email that can receive mail (see Testing "Forgot password") |
 | Terraform shows route/Lambda destroys | Stop; do not apply. Compare against `get-routes` and state |
 
 ## Clean up test data
 
-Test patients are named "Optical Test" or "Lookup Test" (and the UI test patients you add by hand). Delete them (diagnoses cascade) through the Data API:
+Test patients are named "Optical Test", "Lookup Test" or "Records Test ..." (and the UI test patients you add by hand). Delete them (diagnoses cascade) through the Data API (run from the repo root; the `Records Test` ones need `LIKE 'Records Test%'` instead of the name list):
 ```bash
 aws rds-data execute-statement --region ap-south-2 --database oroscope_aurora \
   --resource-arn "$(terraform -chdir=infra output -raw aurora_cluster_arn)" \
@@ -268,4 +306,5 @@ Images expire from S3 automatically after 30 days.
 - Image retention (30 days) is a placeholder; confirm with the clinic.
 - `clinical_rules.provisional_diagnosis` has inconsistent case/whitespace in the source; both scoring and the rules lookup now ignore it (lookup compares `upper(btrim())`; zero conflicts proven). `rules_engine.py` is a database lookup only.
 - Not built: DL inference, SQS/SNS async processing.
-- Add an AWS Budgets alert.
+- AWS Budgets alert is in place (`infra/budget.tf`); its email comes from `alert_email`.
+- Add `httpx` to `requirements-dev.txt` (the route tests use FastAPI's TestClient).

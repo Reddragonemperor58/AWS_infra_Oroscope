@@ -39,6 +39,7 @@ A diagnosis is built up in steps (state machine, ADR 0007): clinical-match creat
 - `optical_image_1_s3_key` (String 255, Nullable) - Set by POST /diagnoses/{id}/optical-upload-urls (server-generated: `diagnoses/{id}/optical_1`); never client-supplied
 - `optical_image_2_s3_key` (String 255, Nullable) - Same, `diagnoses/{id}/optical_2`
 - `status` (ENUM: 'pending', 'processing', 'complete', 'failed', Not Null, Default: 'pending') - Set to 'complete' when the optical step computes a final score (prototype: last step, since DL is skipped)
+- `provisional_diagnosis` (String 255, Nullable) - The provisional diagnosis the score was computed from. Stored by the clinical-lookup and optical steps (request input in the prototype; the DL model will supply it later). Added by migration `5e12d1392533`; cases created before it show "provisional diagnosis not recorded"
 - `rules_match_result` (String 255, Nullable) - Holds the looked-up Differential Diagnosis, via PATCH /diagnoses/{id}/clinical-lookup
 - `advise` (Text, Nullable) - Holds the looked-up Advise text, same endpoint
 - `optical_deviation_index` (Numeric, Nullable) - `1 - SSIM` of the two optical images (SSIM is a similarity; this is the deviation). Set by PATCH /diagnoses/{id}/optical
@@ -48,7 +49,7 @@ A diagnosis is built up in steps (state machine, ADR 0007): clinical-match creat
 - `created_at` (DateTime, Not Null)
 - `updated_at` (DateTime, Not Null)
 
-`provisional_diagnosis` is **not stored** on Diagnoses. In the prototype it is request input to the clinical-lookup and optical steps. Once the DL step exists it will come from the model (see TODOs).
+`provisional_diagnosis` is stored on the Diagnosis row (migration `5e12d1392533`) by the clinical-lookup and optical steps, so each case records which diagnosis its score was computed from. Cases from before the migration have it empty. Once the DL step exists the value will come from the model.
 
 ## Clinical Rules
 
@@ -85,5 +86,6 @@ The optical scoring table (`Scoring_excel_0_to_5_1.xlsx`: Provisional Diagnosis 
 - `Users.id` is the Cognito `sub`; the row is created automatically on a doctor's first request (ADR 0010).
 - Confirm that "two or more ticks -> Multiple symptoms / habits / areas" matches the original app.
 - `updated_at` columns currently only set on INSERT. Need to configure SQLAlchemy `onupdate` hooks or Postgres triggers to refresh on UPDATE.
-- Decide where `provisional_diagnosis` is persisted once the DL step exists (a new column vs. `dl_label`). Until then it is request input, so a Diagnosis row does not record which diagnosis its score was computed from.
+- Decide whether `provisional_diagnosis` stays a separate column or is derived from `dl_label` once the DL step exists.
+- Patient search uses `strpos` on `lower(name)` and the phone number (no index). Fine for a clinic's list; add a trigram index if one doctor ever has many thousands of patients.
 - Confirm the two scoring aliases (IRRITATION FIBROMA, APTHOUS STOMATITIS) and the 7 scored diagnoses with no clinical_rules rows (Fissured Tongue, Geographic Tongue, Herpetic Stomatitis, Melanin Patches, Severe Dysplasia, Smoker's Palate, Verrucous Carcinoma) with the dentist.

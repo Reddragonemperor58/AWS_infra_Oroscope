@@ -44,3 +44,10 @@ dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; font-weight
 .multi legend { padding: 0 4px; }
 .check { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
 .check input { width: auto; min-height: 0; }
+
+input[type="search"] { margin-bottom: 8px; }
+details.more { margin-top: 12px; }
+details.more > summary { cursor: pointer; padding: 6px 0; font-weight: 600; }
+details.more[open] > summary { margin-bottom: 8px; }
+.card .list button.link { white-space: normal; }
+@media (max-width: 480px) { main { padding: 10px; } .card { padding: 12px; } dl { grid-template-columns: 1fr; gap: 0; } dd { margin-bottom: 8px; } }

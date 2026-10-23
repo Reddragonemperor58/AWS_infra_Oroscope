@@ -56,7 +56,7 @@ resource "aws_cloudfront_response_headers_policy" "frontend" {
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self'",
-        "img-src 'self' blob: data:",
+        "img-src 'self' blob: data: https://s3.ap-south-2.amazonaws.com",
         "connect-src 'self' https://cognito-idp.ap-south-2.amazonaws.com https://*.execute-api.ap-south-2.amazonaws.com https://s3.ap-south-2.amazonaws.com",
         "object-src 'none'",
         "base-uri 'none'",

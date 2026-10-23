@@ -47,7 +47,7 @@ class Diagnosis(Base):
     optical_image_1_s3_key = Column(String(255), nullable=True)
     optical_image_2_s3_key = Column(String(255), nullable=True)
     advise = Column(Text, nullable=True)
-    
+    provisional_diagnosis = Column(String(255), nullable=True)
     # YOUR FIX: Explicitly name the type and remove creation ownership from SQLAlchemy
     status = Column(
         Enum(DiagnosisStatus, name="diagnosis_status", create_type=False), 

@@ -21,11 +21,17 @@
   async function request(method, path, body, onWaiting) {
     const token = await window.OroscopeAuth.getIdToken();
     for (let attempt = 0; attempt < 8; attempt++) {
-      const res = await fetch(cfg.apiUrl + path, {
-        method,
-        headers: Object.assign({ Authorization: "Bearer " + token }, body ? { "Content-Type": "application/json" } : {}),
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      let res;
+      try {
+        res = await fetch(cfg.apiUrl + path, {
+          method,
+          headers: Object.assign({ Authorization: "Bearer " + token }, body ? { "Content-Type": "application/json" } : {}),
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch (_) {
+        // fetch only throws when the request never got a response (offline, DNS, blocked)
+        throw new ApiError(0, "Cannot reach the server. Check your internet connection and try again.");
+      }
       // 503 = Aurora is resuming from auto-pause (scale-to-zero). Retry-After is not readable
       // cross-origin, so wait a fixed few seconds.
       if (res.status === 503) {

@@ -60,6 +60,44 @@
     });
   }
 
+  function resetError(err) {
+    switch (err && err.code) {
+      case "CodeMismatchException": return "That code is not correct.";
+      case "ExpiredCodeException": return "That code has expired. Request a new one.";
+      case "InvalidPasswordException": return (err.message || "The new password does not meet the password policy.");
+      case "LimitExceededException":
+      case "TooManyRequestsException":
+      case "TooManyFailedAttemptsException": return "Too many attempts. Wait a while and try again.";
+      case "InvalidParameterException": return "A password reset is not available for this account. Contact the administrator.";
+      default: return "Could not reset the password" + (err && err.code ? " (" + err.code + ")" : "") + ".";
+    }
+  }
+
+  // Emails a one-time code. An unknown email resolves too, so the screen never reveals which
+  // addresses have accounts.
+  function forgotPassword(email) {
+    return new Promise((resolve, reject) => {
+      const u = new CognitoUser({ Username: email, Pool: pool, Storage: memoryStorage });
+      u.forgotPassword({
+        onSuccess() { resolve(); },
+        onFailure(err) {
+          if (err && err.code === "UserNotFoundException") { resolve(); return; }
+          reject(new Error(resetError(err)));
+        },
+      });
+    });
+  }
+
+  function confirmPassword(email, code, newPassword) {
+    return new Promise((resolve, reject) => {
+      const u = new CognitoUser({ Username: email, Pool: pool, Storage: memoryStorage });
+      u.confirmPassword(code, newPassword, {
+        onSuccess() { resolve(); },
+        onFailure(err) { reject(new Error(resetError(err))); },
+      });
+    });
+  }
+
   function logout() {
     if (user) user.signOut();
     user = null;
@@ -67,5 +105,5 @@
     memoryStorage.clear();
   }
 
-  window.OroscopeAuth = { login, getIdToken, logout };
+  window.OroscopeAuth = { login, getIdToken, logout, forgotPassword, confirmPassword };
 })();

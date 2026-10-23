@@ -70,6 +70,14 @@
 * **Terraform `moved` blocks:** Renaming a resource label normally looks like destroy + create. A `moved` block tells Terraform it is the same object, so the live API Gateway route was relabelled in state with no downtime.
 * **BOLA (Broken Object Level Authorization):** Every object query filters by the calling user's id. Returning 404 for both "missing" and "not yours" avoids leaking which ids exist.
 
+### Records, search and the Data API
+* **Why `strpos`, not `ILIKE ... ESCAPE`:** `ILIKE` needs wildcards (`%`, `_`), so searching for "50%" means escaping them with an `ESCAPE '\'` clause. The RDS Data API does its own parsing to find `:name` parameters and mis-reads that backslash literal, which hid the next parameter and produced a syntax error. `strpos(text, search) > 0` is a plain "contains" test with no wildcards, so nothing needs escaping. Interview line: "the Data API is not a transparent Postgres connection, so a query that works over a normal driver can fail through it."
+* **Pagination (`limit` + `offset`):** the list returns 50 patients at a time with a stable sort (name, then id) so Load more never repeats or skips a row.
+* **Presigned GET:** a short-lived signed link to a private S3 object. The API signs one per photo on each request (10 minutes), so images stay private and no long-lived link exists to leak.
+* **Lazy provisioning vs sync:** instead of copying every Cognito user into the database ahead of time, the first request creates the `users` row from the verified token. Fewer moving parts, and it cannot go out of date.
+* **Race-safe insert:** `INSERT ... ON CONFLICT DO NOTHING` lets two simultaneous first requests both succeed with one row.
+* **`replaceChildren(null)` gotcha:** the DOM turns a `null` argument into the text "null". Filter missing elements out first.
+
 ### Frontend & browser security
 * **Static site hosting (S3 + CloudFront):** The page is plain files in a private bucket; CloudFront serves them over HTTPS. There is no server to run or patch, and cost is ~$0 at this scale.
 * **OAC (Origin Access Control):** Lets CloudFront sign its requests to a private S3 bucket. The bucket policy trusts only that one distribution (`AWS:SourceArn`), so the files are public through CloudFront and nowhere else. It replaces the older Origin Access Identity.
