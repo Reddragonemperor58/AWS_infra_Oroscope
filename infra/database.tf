@@ -11,6 +11,16 @@ resource "aws_rds_cluster" "aurora_db" {
   db_subnet_group_name        = aws_db_subnet_group.db_subnet_group.name
   vpc_security_group_ids      = [aws_security_group.db_sg.id]
 
+
+  # --- added: protect patient records ---
+  backup_retention_period   = 7    # keep daily backups for a week (was the 1-day minimum)
+  deletion_protection       = true # a destroy or console delete fails until this is switched off on purpose
+  copy_tags_to_snapshot     = true
+  final_snapshot_identifier = "${local.name_prefix}-final-snapshot" # taken automatically if the cluster is ever deleted
+  apply_immediately         = true                                  # do not wait for the weekly maintenance window
+  # ---------------------------------------
+
+
   serverlessv2_scaling_configuration {
     max_capacity             = 2.0
     min_capacity             = 0.0
