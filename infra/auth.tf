@@ -57,7 +57,7 @@ resource "aws_cognito_user_pool_client" "userpool_client" {
   id_token_validity      = 60
   refresh_token_validity = 1
 
-  enable_token_revocation = true    # logout now invalidates the refresh token on the server
+  enable_token_revocation = true # logout now invalidates the refresh token on the server
 
 
   token_validity_units {
