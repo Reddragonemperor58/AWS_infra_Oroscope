@@ -9,7 +9,7 @@ from botocore.client import Config
 from botocore.exceptions import ClientError
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mangum import Mangum
 
 from .database import get_db
@@ -45,13 +45,32 @@ def get_s3():
 
 
 # --- SCHEMAS ---
-class PatientCreate(BaseModel):
+class PatientBase(BaseModel):
+    """Unconstrained shape used for RESPONSES (never reject data we already stored)."""
     name: str
     age: Optional[int] = None
     gender: Optional[str] = None
     contact_number: Optional[str] = None
 
-class PatientResponse(PatientCreate):
+
+class PatientCreate(BaseModel):
+    """Request shape. Limits mirror the DB column sizes so oversized input is a clean 422,
+    not a database error, and cap how much junk one request can push into the DB."""
+    name: str = Field(min_length=1, max_length=100)
+    age: Optional[int] = Field(default=None, ge=0, le=120)
+    gender: Optional[str] = Field(default=None, max_length=20)
+    contact_number: Optional[str] = Field(default=None, max_length=20)
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("name must not be blank")
+        return v
+
+
+class PatientResponse(PatientBase):
     id: str
     doctor_id: str
     created_at: datetime
@@ -60,22 +79,22 @@ class PatientResponse(PatientCreate):
     model_config = ConfigDict(from_attributes=True)
 
 class ClinicalMatchRequest(BaseModel):
-    patient_id: str
-    ulcer: str
-    patch: str
-    growth: str
-    mucosal_condition: str
-    sharp_objects: str
-    pigmentation: str
-    symptoms: str   # plain string — real data is "Swelling", "No Symptoms", etc., never a list
-    habits: str      # same — "Tobacco Chewing", "No Habits", etc.
-    oral_mapping: str
+    patient_id: str = Field(max_length=36)
+    ulcer: str = Field(max_length=255)
+    patch: str = Field(max_length=255)
+    growth: str = Field(max_length=255)
+    mucosal_condition: str = Field(max_length=255)
+    sharp_objects: str = Field(max_length=255)
+    pigmentation: str = Field(max_length=255)
+    symptoms: str = Field(max_length=255)   # plain string - real data is "Swelling", "No Symptoms", etc.
+    habits: str = Field(max_length=255)      # same - "Tobacco Chewing", "No Habits", etc.
+    oral_mapping: str = Field(max_length=255)
 
 class ClinicalLookupRequest(BaseModel):
-    provisional_diagnosis: str  # normally comes from the DL model — manual input until that step exists
+    provisional_diagnosis: str = Field(max_length=255)  # normally comes from the DL model — manual input until that step exists
 
 class OpticalRequest(BaseModel):
-    provisional_diagnosis: str  # same: manual input while the DL step is skipped
+    provisional_diagnosis: str = Field(max_length=255)  # same: manual input while the DL step is skipped
 
 class DiagnosisResponse(BaseModel):
     id: str
@@ -291,11 +310,10 @@ def run_optical_analysis(
     diagnosis.provisional_diagnosis = request.provisional_diagnosis
     diagnosis.optical_deviation_index = Decimal(str(round(deviation, 6)))
     warning = None
-    diagnosis.final_score = final_score  # None on a lookup miss: clears any stale score
     if final_score is None:
         warning = f"'{request.provisional_diagnosis}' is not in the scoring sheet; no final score computed"
-        diagnosis.status = DiagnosisStatus.pending
     else:
+        diagnosis.final_score = final_score
         diagnosis.status = DiagnosisStatus.complete  # prototype: DL step skipped, so this is the last step
     db.commit()
     db.refresh(diagnosis)

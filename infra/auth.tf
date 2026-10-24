@@ -12,8 +12,8 @@ resource "aws_cognito_user_pool" "user_pool" {
     allow_admin_create_user_only = true
   }
 
-  # Enable MFA (Optional for the user, but supported by the pool)
-  mfa_configuration = "OPTIONAL"
+  # Enable MFA (MFA is required for all doctors)
+  mfa_configuration = "ON"
   software_token_mfa_configuration {
     enabled = true
   }
@@ -55,7 +55,10 @@ resource "aws_cognito_user_pool_client" "userpool_client" {
   # Explicitly declare token validities rather than trusting defaults
   access_token_validity  = 60
   id_token_validity      = 60
-  refresh_token_validity = 30
+  refresh_token_validity = 1
+
+  enable_token_revocation = true    # logout now invalidates the refresh token on the server
+
 
   token_validity_units {
     access_token  = "minutes"

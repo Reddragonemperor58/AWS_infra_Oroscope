@@ -119,16 +119,108 @@
           ev.preventDefault();
           run(btn, async () => {
             setStatus("Signing in...", "info");
-            const who = await Auth.login(email.value.trim(), password.value);
-            state.email = who.email;
+            const res = await Auth.login(email.value.trim(), password.value);
             password.value = "";
-            await renderMain();
+            if (res.status === "totp") { renderTotp(res.email); return; }
+            if (res.status === "setup") { await renderTotpSetup(res.email); return; }
+            await enter(res.email);
           });
         },
       }, field("Email", email), field("Password", password), btn),
       h("p", {}, h("button", { type: "button", class: "link", onclick: () => renderForgot(email.value.trim()) }, "Forgot password?")),
       statusEl));
     if (message) setStatus(message, kind || "error");
+  }
+
+  // Common finish for every way of signing in (password only, with a code, after a refresh).
+  async function enter(email) {
+    state.email = email;
+    startActivity();
+    await renderMain();
+  }
+
+  // Second step of a normal login: the 6-digit code from the authenticator app.
+  function renderTotp(email) {
+    app.replaceChildren();
+    statusEl = h("p", { class: "status", role: "status" });
+    const code = h("input", { type: "text", name: "totp", inputmode: "numeric", pattern: "[0-9]*", maxlength: "6",
+      autocomplete: "one-time-code", required: true });
+    const btn = h("button", { type: "submit" }, "Verify");
+    app.append(h("section", { class: "card narrow" },
+      h("h1", {}, "Two-step sign-in"),
+      h("p", { class: "muted" }, "Open your authenticator app and enter the 6-digit code for Dr. Oroscope."),
+      h("form", {
+        onsubmit: (ev) => {
+          ev.preventDefault();
+          run(btn, async () => {
+            setStatus("Checking...", "info");
+            const who = await Auth.submitTotp(code.value.trim());
+            await enter(who.email || email);
+          });
+        },
+      }, field("6-digit code", code), btn),
+      h("p", {}, h("button", { type: "button", class: "link", onclick: () => { Auth.logout(); renderLogin(); } }, "Back to log in")),
+      statusEl));
+    code.focus();
+  }
+
+  // First login on an account with no authenticator app: show a QR code, then confirm with a code.
+  async function renderTotpSetup(email) {
+    app.replaceChildren();
+    statusEl = h("p", { class: "status", role: "status" });
+    const code = h("input", { type: "text", name: "totp", inputmode: "numeric", pattern: "[0-9]*", maxlength: "6",
+      autocomplete: "one-time-code", required: true });
+    const btn = h("button", { type: "submit" }, "Turn on two-step sign-in");
+    const qrBox = h("div", {}, h("p", { class: "muted" }, "Preparing..."));
+    app.append(h("section", { class: "card narrow" },
+      h("h1", {}, "Set up two-step sign-in"),
+      h("p", { class: "muted" }, "Your account needs an authenticator app (Google Authenticator, Microsoft Authenticator, Authy or similar). " +
+        "1. Scan the QR code with the app. 2. Enter the 6-digit code it shows."),
+      qrBox,
+      h("form", {
+        onsubmit: (ev) => {
+          ev.preventDefault();
+          run(btn, async () => {
+            setStatus("Checking...", "info");
+            const who = await Auth.finishTotpSetup(code.value.trim());
+            await enter(who.email || email);
+          });
+        },
+      }, field("6-digit code", code), btn),
+      h("p", {}, h("button", { type: "button", class: "link", onclick: () => { Auth.logout(); renderLogin(); } }, "Back to log in")),
+      statusEl));
+    try {
+      const { secret, uri } = await Auth.beginTotpSetup(email);
+      const qr = window.qrcode(0, "M");
+      qr.addData(uri);
+      qr.make();
+      qrBox.replaceChildren(
+        h("img", { class: "qr", alt: "QR code for your authenticator app", src: qr.createDataURL(5, 4) }),
+        h("p", { class: "muted" }, "Can't scan? Enter this key in the app instead:"),
+        h("p", { class: "secret" }, secret.replace(/(.{4})/g, "$1 ").trim()));
+    } catch (err) {
+      qrBox.replaceChildren(h("p", { class: "status error" }, err.message || "Could not start the setup."));
+    }
+  }
+
+  // Signs the doctor out after 30 minutes without a click, key press or touch.
+  let activityStarted = false;
+  let idleTimer = null;
+  function startActivity() {
+    Auth.touch();
+    if (!activityStarted) {
+      activityStarted = true;
+      let lastWrite = 0;
+      const bump = () => {
+        const now = Date.now();
+        if (now - lastWrite > 10000) { lastWrite = now; Auth.touch(); }
+      };
+      ["click", "keydown", "touchstart"].forEach((ev) => document.addEventListener(ev, bump, { passive: true }));
+    }
+    if (idleTimer) clearInterval(idleTimer);
+    idleTimer = setInterval(() => {
+      if (state.email && Auth.idleExpired()) doLogout("Signed out after 30 minutes of inactivity.");
+    }, 30000);
   }
 
   function renderForgot(prefill) {
@@ -169,6 +261,7 @@
   }
 
   function doLogout(message) {
+    if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
     Auth.logout();
     Object.assign(state, { email: null, patients: [], patient: null, diagnosis: null, query: "", hasMore: false });
     clearPreviews();
@@ -551,5 +644,5 @@
     state.previews = [];
   }
 
-  renderLogin();
+  Auth.restore().then((who) => (who ? enter(who.email) : renderLogin())).catch(() => renderLogin());
 })();
