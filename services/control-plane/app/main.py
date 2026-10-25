@@ -7,18 +7,20 @@ from typing import List, Optional
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mangum import Mangum
 
 from .database import get_db
 from .dependencies import get_current_user
+from . import audit
 from .models import User, Patient, Diagnosis, DiagnosisStatus
 from .rules_engine import get_differential_and_advise  # get_clinical_diagnosis no longer exists
 from .scoring_engine import get_band, get_final_score
 from . import optical
 from .records import router as records_router
+from .support import router as support_router
 
 app = FastAPI(title="Oroscope Control Plane")
 
@@ -115,6 +117,11 @@ class UploadTarget(BaseModel):
     url: str
     fields: dict
 
+class DlUploadResponse(BaseModel):
+    image: UploadTarget
+    max_bytes: int
+    expires_in_seconds: int
+
 class OpticalUploadResponse(BaseModel):
     image_1: UploadTarget
     image_2: UploadTarget
@@ -148,6 +155,7 @@ def _get_owned_diagnosis(db: Session, diagnosis_id: str, user: User) -> Diagnosi
 # --- ENDPOINTS ---
 @app.post("/patients", response_model=PatientResponse)
 def create_patient(
+    request: Request,
     patient: PatientCreate, 
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
@@ -161,12 +169,14 @@ def create_patient(
         contact_number=patient.contact_number
     )
     db.add(db_patient)
+    audit.record(db, request, current_user, "patient.create", "patient", db_patient.id, db_patient.id)
     db.commit()
     db.refresh(db_patient)
     return db_patient
 
 @app.post("/diagnoses/clinical-match", response_model=DiagnosisResponse)
 def clinical_match(
+    http: Request,
     request: ClinicalMatchRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -197,6 +207,7 @@ def clinical_match(
         status=DiagnosisStatus.pending,
     )
     db.add(db_diagnosis)
+    audit.record(db, http, current_user, "diagnosis.create", "diagnosis", db_diagnosis.id, patient.id)
     db.commit()
     db.refresh(db_diagnosis)
     return db_diagnosis
@@ -204,6 +215,7 @@ def clinical_match(
 
 @app.patch("/diagnoses/{diagnosis_id}/clinical-lookup", response_model=DiagnosisResponse)
 def run_clinical_lookup(
+    http: Request,
     diagnosis_id: str,
     request: ClinicalLookupRequest,
     db: Session = Depends(get_db),
@@ -225,13 +237,50 @@ def run_clinical_lookup(
     diagnosis.provisional_diagnosis = request.provisional_diagnosis
     diagnosis.rules_match_result = result["differential_diagnosis"]
     diagnosis.advise = result["advise"]
+    audit.record(db, http, current_user, "diagnosis.lookup", "diagnosis", diagnosis.id, diagnosis.patient_id)
     db.commit()
     db.refresh(diagnosis)
     return diagnosis
 
 
+def _presigned_image_post(key: str) -> UploadTarget:
+    """Short-lived presigned S3 POST for one image: size and type are enforced by S3 itself."""
+    post = get_s3().generate_presigned_post(
+        Bucket=IMAGES_BUCKET,
+        Key=key,
+        Conditions=[
+            ["content-length-range", 1, MAX_IMAGE_BYTES],
+            ["starts-with", "$Content-Type", "image/"],
+        ],
+        ExpiresIn=UPLOAD_URL_TTL_SECONDS,
+    )
+    return UploadTarget(url=post["url"], fields=post["fields"])
+
+
+@app.post("/diagnoses/{diagnosis_id}/dl-upload-url", response_model=DlUploadResponse)
+def create_dl_upload_url(
+    http: Request,
+    diagnosis_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """The close-up photo meant for the deep-learning classifier. The model is not connected yet,
+    so for now the photo is only stored (key chosen here, never by the client) and the provisional
+    diagnosis is still picked by the doctor."""
+    if not IMAGES_BUCKET:
+        raise HTTPException(status_code=500, detail="Image bucket is not configured")
+    diagnosis = _get_owned_diagnosis(db, diagnosis_id, current_user)
+    key = f"diagnoses/{diagnosis.id}/dl_image"
+    target = _presigned_image_post(key)
+    diagnosis.dl_image_s3_key = key
+    audit.record(db, http, current_user, "diagnosis.dl_upload_url", "diagnosis", diagnosis.id, diagnosis.patient_id)
+    db.commit()
+    return DlUploadResponse(image=target, max_bytes=MAX_IMAGE_BYTES, expires_in_seconds=UPLOAD_URL_TTL_SECONDS)
+
+
 @app.post("/diagnoses/{diagnosis_id}/optical-upload-urls", response_model=OpticalUploadResponse)
 def create_optical_upload_urls(
+    http: Request,
     diagnosis_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -261,6 +310,7 @@ def create_optical_upload_urls(
         targets.append(UploadTarget(url=post["url"], fields=post["fields"]))
 
     diagnosis.optical_image_1_s3_key, diagnosis.optical_image_2_s3_key = keys
+    audit.record(db, http, current_user, "diagnosis.upload_urls", "diagnosis", diagnosis.id, diagnosis.patient_id)
     db.commit()
     return OpticalUploadResponse(
         image_1=targets[0], image_2=targets[1],
@@ -282,6 +332,7 @@ def _read_s3_image(key: str) -> bytes:
 
 @app.patch("/diagnoses/{diagnosis_id}/optical", response_model=OpticalResponse)
 def run_optical_analysis(
+    http: Request,
     diagnosis_id: str,
     request: OpticalRequest,
     db: Session = Depends(get_db),
@@ -315,6 +366,7 @@ def run_optical_analysis(
     else:
         diagnosis.final_score = final_score
         diagnosis.status = DiagnosisStatus.complete  # prototype: DL step skipped, so this is the last step
+    audit.record(db, http, current_user, "diagnosis.optical", "diagnosis", diagnosis.id, diagnosis.patient_id)
     db.commit()
     db.refresh(diagnosis)
 
@@ -329,6 +381,7 @@ def run_optical_analysis(
     )
 
 app.include_router(records_router)
+app.include_router(support_router)
 
 # --- MANGUM WRAPPER ---
 handler = Mangum(app)

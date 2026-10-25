@@ -5,19 +5,20 @@ Every query filters on the calling doctor (BOLA guard): someone else's id return
 as a missing one. API Gateway has already verified the JWT before any of this runs.
 """
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import boto3
 from botocore.client import Config
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from . import audit
 from .database import get_db
 from .dependencies import get_current_user
-from .models import Diagnosis, Patient, User
+from .models import AuditEvent, Diagnosis, Patient, User
 from .scoring_engine import get_band
 
 router = APIRouter()
@@ -98,6 +99,7 @@ class DiagnosisDetail(DiagnosisSummary):
     rules_match_result: Optional[str] = None
     advise: Optional[str] = None
     optical_deviation_index: Optional[float] = None
+    dl_image_url: Optional[str] = None
     image_1_url: Optional[str] = None
     image_2_url: Optional[str] = None
     photo_link_expires_in_seconds: int = PHOTO_LINK_TTL_SECONDS
@@ -135,6 +137,7 @@ def _summary(d: Diagnosis) -> DiagnosisSummary:
 # --- ENDPOINTS ---
 @router.get("/patients", response_model=List[PatientOut])
 def list_patients(
+    request: Request,
     q: Optional[str] = Query(default=None, max_length=100),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -152,16 +155,24 @@ def list_patients(
             func.strpos(func.lower(Patient.name), func.lower(text)) > 0,
             func.strpos(func.coalesce(Patient.contact_number, ""), text) > 0,
         ))
-    return query.order_by(func.lower(Patient.name), Patient.id).offset(offset).limit(limit).all()
+    rows = query.order_by(func.lower(Patient.name), Patient.id).offset(offset).limit(limit).all()
+    # The search text is not logged (it can be a phone number); only that a search happened.
+    audit.record(db, request, current_user, "patient.search" if text else "patient.list", "patient",
+                 commit=True)
+    return rows
 
 
 @router.get("/patients/{patient_id}", response_model=PatientOut)
-def get_patient(patient_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return _owned_patient(db, patient_id, current_user)
+def get_patient(request: Request, patient_id: str, db: Session = Depends(get_db),
+                current_user: User = Depends(get_current_user)):
+    patient = _owned_patient(db, patient_id, current_user)
+    audit.record(db, request, current_user, "patient.view", "patient", patient.id, patient.id, commit=True)
+    return patient
 
 
 @router.patch("/patients/{patient_id}", response_model=PatientOut)
 def update_patient(
+    request: Request,
     patient_id: str,
     update: PatientUpdate,
     db: Session = Depends(get_db),
@@ -178,6 +189,8 @@ def update_patient(
         setattr(patient, field, value)
     if changes:
         patient.updated_at = func.now()  # the column only has an insert-time default
+        audit.record(db, request, current_user, "patient.update", "patient", patient.id, patient.id,
+                     detail="fields: " + ",".join(sorted(changes)))
     db.commit()
     db.refresh(patient)
     return patient
@@ -185,6 +198,7 @@ def update_patient(
 
 @router.get("/patients/{patient_id}/diagnoses", response_model=List[DiagnosisSummary])
 def list_patient_diagnoses(
+    request: Request,
     patient_id: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -201,16 +215,23 @@ def list_patient_diagnoses(
         .limit(limit)
         .all()
     )
+    audit.record(db, request, current_user, "diagnosis.list", "patient", patient.id, patient.id, commit=True)
     return [_summary(d) for d in rows]
 
 
 @router.get("/diagnoses/{diagnosis_id}", response_model=DiagnosisDetail)
-def get_diagnosis(diagnosis_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_diagnosis(request: Request, diagnosis_id: str, db: Session = Depends(get_db),
+                  current_user: User = Depends(get_current_user)):
     """One case in full, with short-lived links to its photos (they may no longer exist in S3
     once the retention period has passed; the page shows that case gracefully)."""
     d = db.query(Diagnosis).filter(Diagnosis.id == diagnosis_id, Diagnosis.doctor_id == current_user.id).first()
     if not d:
         raise HTTPException(status_code=404, detail="Diagnosis not found")
+    audit.record(db, request, current_user, "diagnosis.view", "diagnosis", d.id, d.patient_id, commit=True)
+    return _detail(d)
+
+
+def _detail(d: Diagnosis) -> "DiagnosisDetail":
     base = _summary(d).model_dump()
     return DiagnosisDetail(
         **base,
@@ -228,6 +249,74 @@ def get_diagnosis(diagnosis_id: str, db: Session = Depends(get_db), current_user
         rules_match_result=d.rules_match_result,
         advise=d.advise,
         optical_deviation_index=float(d.optical_deviation_index) if d.optical_deviation_index is not None else None,
+        dl_image_url=_photo_link(getattr(d, "dl_image_s3_key", None)),
         image_1_url=_photo_link(d.optical_image_1_s3_key),
         image_2_url=_photo_link(d.optical_image_2_s3_key),
+    )
+
+
+# --- ACCOUNT, ACTIVITY, EXPORT ---
+class MeOut(BaseModel):
+    id: str
+    email: str
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ActivityOut(BaseModel):
+    action: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    patient_id: Optional[str] = None
+    detail: Optional[str] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PatientExport(BaseModel):
+    exported_at: datetime
+    patient: PatientOut
+    diagnoses: List[DiagnosisDetail]
+
+
+@router.get("/me", response_model=MeOut)
+def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+@router.get("/me/activity", response_model=List[ActivityOut])
+def my_activity(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The calling doctor's own recent actions, newest first (never anyone else's)."""
+    return (
+        db.query(AuditEvent)
+        .filter(AuditEvent.doctor_id == current_user.id)
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+
+@router.get("/patients/{patient_id}/export", response_model=PatientExport)
+def export_patient(request: Request, patient_id: str, db: Session = Depends(get_db),
+                   current_user: User = Depends(get_current_user)):
+    """Everything held about one patient as a single JSON document (their data-access right).
+    Photo links inside it expire after 10 minutes, so download the photos right away."""
+    patient = _owned_patient(db, patient_id, current_user)
+    rows = (
+        db.query(Diagnosis)
+        .filter(Diagnosis.patient_id == patient.id, Diagnosis.doctor_id == current_user.id)
+        .order_by(Diagnosis.created_at.desc(), Diagnosis.id)
+        .all()
+    )
+    audit.record(db, request, current_user, "patient.export", "patient", patient.id, patient.id, commit=True)
+    return PatientExport(
+        exported_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        patient=PatientOut.model_validate(patient),
+        diagnoses=[_detail(d) for d in rows],
     )

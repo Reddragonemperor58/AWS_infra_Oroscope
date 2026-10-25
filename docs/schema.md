@@ -89,3 +89,38 @@ The optical scoring table (`Scoring_excel_0_to_5_1.xlsx`: Provisional Diagnosis 
 - Decide whether `provisional_diagnosis` stays a separate column or is derived from `dl_label` once the DL step exists.
 - Patient search uses `strpos` on `lower(name)` and the phone number (no index). Fine for a clinic's list; add a trigram index if one doctor ever has many thousands of patients.
 - Confirm the two scoring aliases (IRRITATION FIBROMA, APTHOUS STOMATITIS) and the 7 scored diagnoses with no clinical_rules rows (Fissured Tongue, Geographic Tongue, Herpetic Stomatitis, Melanin Patches, Severe Dysplasia, Smoker's Palate, Verrucous Carcinoma) with the dentist.
+
+
+## Audit events
+
+Append-only record of who did what (ADR 0016). No foreign keys, so rows outlive patients and doctors.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | varchar(36) PK | uuid |
+| doctor_id | varchar(36) | the Cognito `sub` of the signed-in doctor, indexed with created_at |
+| action | varchar(40) | `patient.create/list/search/view/update/export`, `diagnosis.create/list/view/lookup/upload_urls/optical` |
+| resource_type, resource_id | varchar(20), varchar(36) | what was touched |
+| patient_id | varchar(36) | indexed, for "who touched this patient" |
+| detail | varchar(255) | field names only, e.g. `fields: age,name`. Never patient values |
+| source_ip | varchar(45) | from API Gateway |
+| created_at | timestamp | default now() |
+
+Migration `0db257443e1a` (after `5e12d1392533`). Apply with `alembic upgrade head`; undo with `alembic downgrade -1`.
+
+
+## Problem reports
+
+Messages from the in-app "Report a problem" form (ADR 0017). The text is free-form and can hold patient
+details by mistake, so it exists only in this table (never in logs or audit rows).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | varchar(36) PK | uuid |
+| doctor_id | varchar(36) | who sent it; indexed |
+| message | text | up to 2000 characters |
+| context | varchar(1000) | app version, screen, viewport, last error shown, browser. No patient data |
+| created_at | timestamp | default now() |
+
+Migration `fb50dc5a8587` (after `0db257443e1a`). `diagnoses.dl_image_s3_key` (existing column) now holds the
+close-up photo for the classifier: `diagnoses/<id>/dl_image`.

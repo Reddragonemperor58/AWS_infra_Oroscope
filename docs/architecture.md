@@ -166,3 +166,22 @@ flowchart LR
 - **Records screens (ADR 0014):** the patient list has a debounced search box and a Load more button (50 per page). Opening a patient shows editable details and a case history; opening a case shows its findings, advice, band, score and the two photos (a photo that has expired shows "Photo is no longer available."). The history refreshes after each new diagnosis. A "Forgot password" link uses Cognito's emailed code (the account needs a verified email address that can receive mail).
 - **Images in the browser:** the CSP `img-src` allows `https://s3.ap-south-2.amazonaws.com` so signed photo links can display.
 - **Verified in a real browser:** login, patient create, clinical lookup, upload through S3 CORS, score, search, history, case detail with photos, edit patient, forgot password. Open: the "Multiple ..." collapse rule is inferred from the table and still to be confirmed against the original app.
+
+
+## Audit trail and account (ADR 0015, ADR 0016)
+
+- Every patient/diagnosis endpoint writes an `audit_events` row (ids and field names only) in the same session as the action.
+- `GET /me`, `GET /me/activity` (own actions only), `GET /patients/{id}/export` (audited JSON copy).
+- Sign-in needs email + password + authenticator code (Cognito MFA ON). The session sits in sessionStorage,
+  signs out after 30 minutes idle; the refresh token lasts 1 day and is revoked on logout.
+- Account screen: change password (Cognito checks the current one again) and recent activity.
+
+
+## Photos, reports and problem reports (ADR 0017)
+
+- Photos: one reusable picker (live camera via `getUserMedia`, or file upload). Three photos per case:
+  a close-up for the future classifier (`dl-upload-url`), and red-light and blue-light photos for the optical
+  analysis (`optical-upload-urls`). All go straight to S3 through short-lived presigned POSTs.
+- PDF report: built in the browser from the case data and photos (jsPDF, vendored). Draft layout.
+- Problem reports: `POST /problem-reports` -> `problem_reports` table; a `PROBLEM_REPORT id=...` log line trips
+  a CloudWatch alarm that emails the alerts topic.

@@ -4,7 +4,12 @@ crashes. This test fails first."""
 
 EXPECTED = {
     "/health": {"get"},
+    "/me": {"get"},
+    "/problem-reports": {"post"},
+    "/diagnoses/{diagnosis_id}/dl-upload-url": {"post"},
+    "/me/activity": {"get"},
     "/patients": {"get", "post"},
+    "/patients/{patient_id}/export": {"get"},
     "/patients/{patient_id}": {"get", "patch"},
     "/patients/{patient_id}/diagnoses": {"get"},
     "/diagnoses/clinical-match": {"post"},

@@ -217,6 +217,26 @@
     });
   }
 
+  function changeError(err) {
+    switch (err && err.code) {
+      case "NotAuthorizedException": return "The current password is not correct.";
+      case "InvalidPasswordException": return err.message || "The new password does not meet the password policy.";
+      case "LimitExceededException":
+      case "TooManyRequestsException": return "Too many attempts. Wait a while and try again.";
+      default: return "Could not change the password" + (err && err.code ? " (" + err.code + ")" : "") + ".";
+    }
+  }
+
+  // Changes the password of the signed-in doctor. Cognito checks the current password again.
+  function changePassword(oldPassword, newPassword) {
+    return new Promise((resolve, reject) => {
+      if (!user || !session) { reject(new Error("Not logged in")); return; }
+      user.changePassword(oldPassword, newPassword, (err) => {
+        if (err) reject(new Error(changeError(err))); else resolve();
+      });
+    });
+  }
+
   function logout() {
     if (user) user.signOut();
     user = null;
@@ -227,6 +247,6 @@
 
   window.OroscopeAuth = {
     login, submitTotp, beginTotpSetup, finishTotpSetup, restore, touch, idleExpired,
-    getIdToken, logout, forgotPassword, confirmPassword, IDLE_LIMIT_MS,
+    getIdToken, logout, forgotPassword, confirmPassword, changePassword, IDLE_LIMIT_MS,
   };
 })();

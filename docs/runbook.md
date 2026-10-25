@@ -308,3 +308,69 @@ Images expire from S3 automatically after 30 days.
 - Not built: DL inference, SQS/SNS async processing.
 - AWS Budgets alert is in place (`infra/budget.tf`); its email comes from `alert_email`.
 - Add `httpx` to `requirements-dev.txt` (the route tests use FastAPI's TestClient).
+
+
+## Audit trail
+
+Who touched a patient (run through the Data API, see "Querying the Database Directly"):
+
+```sql
+SELECT created_at, doctor_id, action, detail, source_ip
+FROM audit_events WHERE patient_id = '<patient id>' ORDER BY created_at DESC LIMIT 50;
+```
+
+A doctor's own recent actions are on the Account screen (`GET /me/activity`).
+Test it live: `python3 scripts/test_audit_flow.py` (needs `API_URL` and `ID_TOKEN`; delete the "Audit Test" patient afterwards).
+
+## Export a patient's data
+
+Doctor: open the patient, press "Download patient data". Photo links in the file expire after 10 minutes.
+Every export is itself an audit row (`patient.export`).
+
+## A doctor lost their authenticator phone
+
+MFA is required, so they cannot sign in. **Do not delete and re-create the Cognito user**: patients are tied
+to the Cognito `sub`, and a new user gets a new `sub`, which would orphan every patient.
+
+Try this on a TEST account first (not yet verified against real AWS):
+
+```bash
+aws cognito-idp admin-set-user-mfa-preference --region ap-south-2 \
+  --user-pool-id <pool id> --username <email> \
+  --software-token-mfa-settings Enabled=false,PreferredMfa=false
+aws cognito-idp admin-user-global-sign-out --region ap-south-2 --user-pool-id <pool id> --username <email>
+```
+
+At the next sign-in Cognito should offer the QR enrolment screen again. If it does not, stop and ask
+before trying anything else. Confirm the person's identity first (call them), since this removes their second factor.
+
+
+## Problem reports
+
+An alarm email "oroscope-dev-problem-report" means a doctor filed a report. Read the newest ones:
+
+```sql
+SELECT created_at, doctor_id, message, context FROM problem_reports ORDER BY created_at DESC LIMIT 20;
+```
+
+Run it through `aws rds-data execute-statement` (see "Querying the Database Directly"). Look up the doctor's
+email with `SELECT email FROM users WHERE id = '<doctor_id>'`. The `lastError` inside `context` is usually
+the quickest clue; the same time window in the Lambda log shows the server side.
+
+## Camera and photos (dental camera)
+
+- The dental camera must show up as a normal webcam (USB video class). Plug it in, open the camera panel,
+  press "Refresh cameras" and pick it from the list. The choice is remembered per device and browser.
+- "Camera access is blocked": the doctor allowed no camera for this site. Browser settings -> site settings ->
+  camera -> allow. Needs HTTPS (the site is).
+- "No camera found" or an empty list: unplug and replug, press Refresh, close other apps that use the camera
+  (video call, camera app). Android and iPad browsers may need the camera app closed first.
+- Red-light and blue-light photos are two separate captures: switch the camera light, then take each photo.
+- The browser must allow the camera: `infra/frontend.tf` must not send a `Permissions-Policy` that blocks it
+  (`camera=()` would). Check with: `grep -n -i "permissions" infra/frontend.tf`.
+
+## PDF report
+
+Doctors press "Download PDF report" on a case. It is built in the browser. If photos show "Photo not available"
+for a case whose photos still exist, check that the images bucket CORS allows GET from the site
+(`aws_s3_bucket_cors_configuration.images` in `infra/frontend.tf`). Non-Latin patient names print as "?".

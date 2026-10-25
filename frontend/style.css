@@ -63,3 +63,19 @@ button.link { min-height: 44px; }
 details.more > summary { min-height: 44px; padding: 10px 0; } /* padding, not flex, so the expand arrow stays */
 .check { min-height: 44px; gap: 10px; padding: 0 4px; }
 .check input { width: 22px; height: 22px; flex: none; }
+
+[hidden] { display: none !important; }
+.bar button { white-space: nowrap; }
+
+.bar { flex-wrap: wrap; }
+.report-link { margin: 24px 0 8px; }
+.report-link button.link { width: auto; color: var(--muted); text-decoration: underline; }
+textarea { font: inherit; width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); resize: vertical; }
+.capture { min-width: 0; margin-bottom: 8px; }
+.capture-label { margin: 0 0 6px; font-weight: 600; }
+.capture-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.capture-select { flex: 1; min-width: 160px; }
+.capture-panel { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-top: 8px; }
+.capture-video { width: 100%; max-height: 60vh; background: #000; border-radius: 6px; display: block; }
+.capture-panel[hidden] { display: none; }
+@media (max-width: 480px) { .bar .muted { flex: 1 1 100%; order: 3; } }

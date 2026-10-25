@@ -36,13 +36,17 @@ class FakeQuery:
 
 
 class FakeDb:
-    def __init__(self, patients=(), diagnoses=()):
-        self.data = {"Patient": list(patients), "Diagnosis": list(diagnoses)}
+    def __init__(self, patients=(), diagnoses=(), events=()):
+        self.data = {"Patient": list(patients), "Diagnosis": list(diagnoses), "AuditEvent": list(events)}
+        self.added = []
         self.commits = 0
         self.filters = []
 
     def query(self, model):
         return FakeQuery(self.data[model.__name__], self.filters)
+
+    def add(self, obj):
+        self.added.append(obj)
 
     def commit(self):
         self.commits += 1
@@ -162,3 +166,86 @@ def test_unanalysed_case_has_no_band_or_score():
 
 def test_missing_diagnosis_is_404():
     assert client(FakeDb()).get("/diagnoses/x").status_code == 404
+
+
+# ---- audit trail, /me, export ----
+def actions(db):
+    return [e.action for e in db.added]
+
+
+def test_reads_write_an_audit_row_and_commit():
+    db = FakeDb(patients=[make_patient()], diagnoses=[make_diagnosis()])
+    c = client(db)
+    c.get("/patients")
+    c.get("/patients", params={"q": "asha"})
+    c.get("/patients/p1")
+    c.get("/patients/p1/diagnoses")
+    c.get("/diagnoses/d1")
+    assert actions(db) == ["patient.list", "patient.search", "patient.view", "diagnosis.list", "diagnosis.view"]
+    assert db.commits == 5
+    assert all(e.doctor_id == "u1" for e in db.added)
+
+
+def test_audit_never_stores_the_search_text_or_patient_values():
+    db = FakeDb(patients=[make_patient()])
+    client(db).get("/patients", params={"q": "9876543210"})
+    dump = " ".join(str(vars(e)) for e in db.added)
+    assert "9876543210" not in dump and "Asha" not in dump
+
+
+def test_update_audit_lists_field_names_only():
+    db = FakeDb(patients=[make_patient()])
+    client(db).patch("/patients/p1", json={"name": "New Name", "age": 41})
+    (event,) = db.added
+    assert event.action == "patient.update" and event.detail == "fields: age,name"
+    assert "New Name" not in str(vars(event))
+
+
+def test_failed_lookup_writes_no_audit_row():
+    db = FakeDb()
+    assert client(db).get("/patients/nope").status_code == 404
+    assert db.added == []
+
+
+def test_me_returns_the_caller(monkeypatch):
+    app = FastAPI()
+    app.include_router(records.router)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="u1", email="a@b.com", created_at=NOW)
+    r = TestClient(app).get("/me")
+    assert r.status_code == 200 and r.json()["email"] == "a@b.com"
+
+
+def test_activity_is_filtered_to_the_caller():
+    from sqlalchemy.dialects import postgresql
+    ev = SimpleNamespace(action="patient.view", resource_type="patient", resource_id="p1",
+                         patient_id="p1", detail=None, created_at=NOW)
+    db = FakeDb(events=[ev])
+    r = client(db).get("/me/activity")
+    assert r.status_code == 200 and r.json()[0]["action"] == "patient.view"
+    sql = " ".join(str(f.compile(dialect=postgresql.dialect())) for f in db.filters)
+    assert "doctor_id" in sql
+
+
+def test_export_has_patient_and_cases_and_is_audited():
+    db = FakeDb(patients=[make_patient()], diagnoses=[make_diagnosis()])
+    r = client(db).get("/patients/p1/export")
+    body = r.json()
+    assert r.status_code == 200
+    assert body["patient"]["name"] == "Asha" and body["diagnoses"][0]["id"] == "d1"
+    assert body["diagnoses"][0]["image_1_url"].startswith("https://signed/")
+    assert actions(db) == ["patient.export"]
+
+
+def test_export_of_foreign_patient_is_404():
+    assert client(FakeDb()).get("/patients/p9/export").status_code == 404
+
+
+def test_detail_includes_dl_photo_link_when_present():
+    db = FakeDb(diagnoses=[make_diagnosis(dl_image_s3_key="diagnoses/d1/dl_image")])
+    body = client(db).get("/diagnoses/d1").json()
+    assert body["dl_image_url"] == "https://signed/diagnoses/d1/dl_image"
+
+
+def test_detail_dl_photo_link_is_null_when_absent():
+    db = FakeDb(diagnoses=[make_diagnosis()])
+    assert client(db).get("/diagnoses/d1").json()["dl_image_url"] is None

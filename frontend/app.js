@@ -4,9 +4,12 @@
   "use strict";
   const Auth = window.OroscopeAuth;
   const Api = window.OroscopeApi;
+  const Capture = window.OroscopeCapture;
+  const Report = window.OroscopeReport;
+  const APP_VERSION = "2026-10-25-b5";
   const app = document.getElementById("app");
   const state = { email: null, patients: [], patient: null, diagnosis: null, options: null, previews: [],
-    query: "", hasMore: false, listSeq: 0 };
+    query: "", hasMore: false, listSeq: 0, lastError: "", panel: "patients" };
 
   // value = what the API receives (matches the clinical_rules spelling; scoring ignores case/spaces).
   // The first 22 exist in the rules table; the last 7 are scored but have no rules (lookup returns 404).
@@ -88,6 +91,7 @@
     if (!statusEl) return;
     statusEl.className = "status " + (kind || "");
     statusEl.textContent = msg || "";
+    if (kind === "error" && msg) state.lastError = msg;
   }
 
   // Runs an async action with the button disabled; shows errors; returns to login on 401.
@@ -263,7 +267,7 @@
   function doLogout(message) {
     if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
     Auth.logout();
-    Object.assign(state, { email: null, patients: [], patient: null, diagnosis: null, query: "", hasMore: false });
+    Object.assign(state, { email: null, patients: [], patient: null, diagnosis: null, query: "", hasMore: false, panel: "patients" });
     clearPreviews();
     renderLogin(message);
   }
@@ -289,10 +293,15 @@
     statusEl = h("p", { class: "status", role: "status" });
     state.patientsEl = h("div", {});
     state.diagnosisEl = h("div", {});
+    state.accountEl = h("div", { hidden: true });
+    state.reportEl = h("div", { hidden: true });
+    state.panel = "patients";
     app.append(
       h("header", { class: "bar" }, h("strong", {}, "Dr. Oroscope"), h("span", { class: "muted" }, state.email),
+        h("button", { type: "button", class: "secondary", onclick: () => showPanel("account") }, "Account"),
         h("button", { type: "button", class: "secondary", onclick: () => doLogout() }, "Log out")),
-      statusEl, state.patientsEl, state.diagnosisEl);
+      statusEl, state.accountEl, state.reportEl, state.patientsEl, state.diagnosisEl,
+      h("p", { class: "report-link" }, h("button", { type: "button", class: "link", onclick: () => showPanel("report") }, "Report a problem")));
     if (!state.options) {
       const res = await fetch("options.json");
       if (!res.ok) throw new Error("Could not load form options.");
@@ -300,6 +309,92 @@
     }
     renderPatientsShell();
     await loadPatients(true);
+  }
+
+  // Account panel: who is signed in, change password, and the doctor's own recent activity.
+  function showPanel(name) {
+    state.panel = name;
+    state.accountEl.hidden = name !== "account";
+    state.reportEl.hidden = name !== "report";
+    state.patientsEl.hidden = name !== "patients";
+    state.diagnosisEl.hidden = name !== "patients";
+    setStatus("");
+    if (name === "account") renderAccount();
+    if (name === "report") renderReportForm();
+  }
+
+  // "Report a problem": a short message plus technical context the doctor does not have to type.
+  // The context holds no patient data (screen name, app version, browser, last error message).
+  function renderReportForm() {
+    const message = h("textarea", { name: "message", maxlength: "2000", rows: "6", required: true,
+      placeholder: "What happened? What were you trying to do?" });
+    const btn = h("button", { type: "submit" }, "Send report");
+    const form = h("form", {
+      onsubmit: (ev) => {
+        ev.preventDefault();
+        run(btn, async () => {
+          const screen = state.diagnosis ? "new case" : state.patient ? "patient" : "patient list";
+          const context = ["app=" + APP_VERSION, "screen=" + screen, "viewport=" + window.innerWidth + "x" + window.innerHeight,
+            "lastError=" + (state.lastError || "none").slice(0, 200), "browser=" + navigator.userAgent.slice(0, 250)].join("; ").slice(0, 1000);
+          await Api.post("/problem-reports", { message: message.value.trim(), context }, waiting);
+          form.reset();
+          setStatus("Thank you. Your report was sent.", "info");
+        });
+      },
+    }, field("Describe the problem", message), btn);
+    state.reportEl.replaceChildren(h("section", { class: "card" },
+      h("h2", {}, "Report a problem"),
+      h("p", { class: "muted" }, "Please do not type patient names or phone numbers. The app also sends the screen you were on, your browser and the last error shown."),
+      form,
+      h("p", {}, h("button", { type: "button", class: "secondary", onclick: () => showPanel("patients") }, "Back to patients"))));
+  }
+
+  function renderAccount() {
+    const oldPw = h("input", { type: "password", name: "old", autocomplete: "current-password", required: true });
+    const newPw = h("input", { type: "password", name: "new", autocomplete: "new-password", required: true, minlength: "16" });
+    const again = h("input", { type: "password", name: "again", autocomplete: "new-password", required: true, minlength: "16" });
+    const btn = h("button", { type: "submit" }, "Change password");
+    const form = h("form", {
+      onsubmit: (ev) => {
+        ev.preventDefault();
+        run(btn, async () => {
+          if (newPw.value !== again.value) throw new Error("The two new passwords do not match.");
+          await Auth.changePassword(oldPw.value, newPw.value);
+          form.reset();
+          setStatus("Password changed.", "info");
+        });
+      },
+    }, field("Current password", oldPw), field("New password (at least 16 characters)", newPw),
+      field("New password again", again), btn);
+
+    const activity = h("ul", { class: "list" }, h("li", { class: "muted" }, "Loading..."));
+    Api.get("/me/activity?limit=20", waiting).then((rows) => {
+      activity.replaceChildren(...(rows.length ? rows.map((r) =>
+        h("li", {}, fmtDate(r.created_at) + "  " + r.action + (r.detail ? " (" + r.detail + ")" : ""))) :
+        [h("li", { class: "muted" }, "Nothing yet.")]));
+    }).catch(fail);
+
+    state.accountEl.replaceChildren(h("section", { class: "card" },
+      h("h2", {}, "Account"),
+      h("dl", {}, h("dt", {}, "Email"), h("dd", {}, state.email)),
+      h("h3", {}, "Change password"), form,
+      h("h3", {}, "Your recent activity"),
+      h("p", { class: "muted" }, "Everything done under your login: who or what was opened, changed or exported."),
+      activity,
+      h("p", {}, h("button", { type: "button", class: "secondary", onclick: () => showPanel("patients") }, "Back to patients"))));
+  }
+
+  // Downloads everything held about one patient as a JSON file (names, cases, findings; the photo
+  // links inside expire after 10 minutes).
+  async function downloadPatient(p) {
+    const data = await Api.get("/patients/" + p.id + "/export", waiting);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = h("a", { href: url, download: "patient-" + p.id + ".json" });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 
   // Built once so the search box keeps focus while the list below it refreshes.
@@ -436,7 +531,11 @@
         h("dt", {}, "Age"), h("dd", {}, p.age != null ? String(p.age) : "-"),
         h("dt", {}, "Gender"), h("dd", {}, p.gender || "-"),
         h("dt", {}, "Contact"), h("dd", {}, p.contact_number || "-")),
-      h("details", { class: "more" }, h("summary", {}, "Edit details"), editForm));
+      h("details", { class: "more" }, h("summary", {}, "Edit details"), editForm),
+      h("p", {}, h("button", { type: "button", class: "secondary", onclick: (ev) => run(ev.currentTarget, async () => {
+        await downloadPatient(p);
+        setStatus("Downloaded. This file contains patient data; store it securely.", "info");
+      }) }, "Export all data (JSON)")));
   }
 
   async function loadHistory() {
@@ -484,6 +583,8 @@
         ["Final score", d.final_score != null ? d.final_score + " / 5" : "Not available"],
         ["Status", d.status],
       ];
+      const pdfBtn = h("button", { type: "button" }, "Download PDF report");
+      pdfBtn.addEventListener("click", () => run(pdfBtn, () => makePdf(d.id)));
       const photo = (url, label) => {
         const box = h("div", {}, h("p", { class: "muted" }, label));
         if (!url) { box.append(h("p", { class: "muted" }, "No photo.")); return box; }
@@ -496,8 +597,10 @@
         h("h2", {}, "Case from " + fmtDate(d.created_at)),
         h("dl", {}, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v == null || v === "" ? "-" : String(v))])),
         h("h3", {}, "Photos"),
-        h("div", { class: "grid" }, photo(d.image_1_url, "Image 1 (red light)"), photo(d.image_2_url, "Image 2 (blue light)")),
-        h("p", { class: "muted" }, "Photos are kept for a limited time and may no longer be available for older cases.")));
+        h("div", { class: "grid" }, photo(d.dl_image_url, "Close-up (classification)"),
+          photo(d.image_1_url, "Image 1 (red light)"), photo(d.image_2_url, "Image 2 (blue light)")),
+        h("p", { class: "muted" }, "Photos are kept for a limited time and may no longer be available for older cases."),
+        h("p", {}, pdfBtn)));
       state.workEl.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
       fail(err);
@@ -562,20 +665,25 @@
       }
     }));
 
-    const img1 = h("input", { type: "file", name: "image1", accept: "image/jpeg,image/png", required: true });
-    const img2 = h("input", { type: "file", name: "image2", accept: "image/jpeg,image/png", required: true });
-    const prev1 = h("img", { class: "preview", alt: "Image 1 preview", hidden: true });
-    const prev2 = h("img", { class: "preview", alt: "Image 2 preview", hidden: true });
-    const showPreview = (input, img) => input.addEventListener("change", () => {
-      const f = input.files[0];
-      if (!f) { img.hidden = true; return; }
-      const url = URL.createObjectURL(f);
-      state.previews.push(url);
-      img.src = url;
-      img.hidden = false;
-    });
-    showPreview(img1, prev1);
-    showPreview(img2, prev2);
+    // Step 2 photo (for the deep-learning classifier, which is not connected yet): captured or
+    // uploaded and stored with the case. The provisional diagnosis is still chosen by the doctor.
+    Capture.stopAll();
+    const dlPicker = Capture.picker({ label: "Close-up photo for the classification model", name: "dl_image", maxBytes: MAX_IMAGE_BYTES });
+    const dlBtn = h("button", { type: "button" }, "Save photo");
+    const dlOut = h("p", { class: "muted", "aria-live": "polite" });
+    dlBtn.addEventListener("click", () => run(dlBtn, async () => {
+      const f = dlPicker.getFile();
+      if (!f) throw new Error("Take a photo or choose an image first.");
+      setStatus("Saving photo...", "info");
+      const t = await Api.post("/diagnoses/" + state.diagnosis.id + "/dl-upload-url", undefined, waiting);
+      await uploadToS3(t.image, f);
+      setStatus("");
+      dlOut.textContent = "Photo saved with this case. The classification model is not connected yet, so choose the provisional diagnosis yourself below.";
+    }));
+
+    // Step 3 photos: red light then blue light, each taken with the camera or uploaded.
+    const pick1 = Capture.picker({ label: "Image 1 (red light)", name: "optical_1", maxBytes: MAX_IMAGE_BYTES });
+    const pick2 = Capture.picker({ label: "Image 2 (blue light)", name: "optical_2", maxBytes: MAX_IMAGE_BYTES });
     const analyzeBtn = h("button", { type: "submit" }, "Analyze images");
     const opticalOut = h("div", { class: "result", "aria-live": "polite" });
 
@@ -584,7 +692,7 @@
         ev.preventDefault();
         run(analyzeBtn, async () => {
           if (!provisional.value) { setStatus("Choose a provisional diagnosis first.", "error"); return; }
-          const files = [img1.files[0], img2.files[0]];
+          const files = [pick1.getFile(), pick2.getFile()];
           for (const f of files) {
             if (!f || !f.type.startsWith("image/")) throw new Error("Choose two image files (JPEG or PNG).");
             if (f.size > MAX_IMAGE_BYTES) throw new Error("Each image must be 10 MB or smaller.");
@@ -602,15 +710,56 @@
           loadHistory();
         });
       },
-    }, h("div", { class: "grid" },
-      field("Image 1 (red light)", img1), field("Image 2 (blue light)", img2)),
-    h("div", { class: "grid" }, prev1, prev2), analyzeBtn);
+    }, h("div", { class: "grid" }, pick1.el, pick2.el), analyzeBtn);
 
     state.stepsEl.replaceChildren(h("section", { class: "card" },
       h("h3", {}, "2. Provisional diagnosis and clinical lookup"),
       h("p", { class: "muted" }, "Diagnosis ID: " + state.diagnosis.id),
+      dlPicker.el, dlBtn, dlOut,
       field("Provisional diagnosis", provisional), lookupBtn, lookupOut,
       h("h3", {}, "3. Optical analysis"), form, opticalOut));
+  }
+
+  // Builds and saves the PDF for one case. Always loads the case again so the photo links are fresh
+  // (links on screen may be minutes old and expire after 10 minutes).
+  async function makePdf(diagnosisId) {
+    setStatus("Building the report...", "info");
+    const d = await Api.get("/diagnoses/" + diagnosisId, waiting);
+    const labels = [[d.dl_image_url, "Close-up (classification)"], [d.image_1_url, "Image 1 (red light)"], [d.image_2_url, "Image 2 (blue light)"]];
+    const images = [];
+    for (const [url, label] of labels) {
+      if (!url && label.startsWith("Close-up")) continue; // older cases have no close-up photo
+      let shot = null, reason = url ? "" : "no photo saved";
+      if (url) {
+        try { shot = await photoToJpeg(url); } catch (e) {
+          reason = (e && e.message) || "could not load";
+          console.warn("PDF photo failed:", label, e);
+        }
+      }
+      images.push({ label, dataUrl: shot && shot.dataUrl, w: shot && shot.w, h: shot && shot.h, reason });
+    }
+    const doc = Report.build({ generatedAt: new Date(), doctorEmail: state.email, patient: state.patient || {},
+      diagnosis: d, caseDate: fmtDate(d.created_at), images });
+    doc.save("oroscope-report-" + d.id.slice(0, 8) + ".pdf");
+    setStatus("PDF report downloaded.", "info");
+  }
+
+  // Downloads a (signed) photo link and re-encodes it as a modest JPEG for the PDF. Reading the
+  // pixels needs the images bucket to allow GET from this site (CORS), see infra/frontend.tf.
+  async function photoToJpeg(url, maxSide) {
+    const limit = maxSide || 1200;
+    // cache: "no-store" so a copy cached earlier by the plain <img> tag (no CORS headers) is never reused
+    let res;
+    try { res = await fetch(url, { mode: "cors", cache: "no-store" }); } catch (e) { throw new Error("blocked or offline (CORS?)"); }
+    if (!res.ok) throw new Error(res.status === 403 ? "link expired" : res.status === 404 ? "photo deleted" : "status " + res.status);
+    let bmp;
+    try { bmp = await createImageBitmap(await res.blob()); } catch (e) { throw new Error("unreadable image"); }
+    const scale = Math.min(1, limit / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale), hgt = Math.round(bmp.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = hgt;
+    canvas.getContext("2d").drawImage(bmp, 0, 0, w, hgt);
+    return { dataUrl: canvas.toDataURL("image/jpeg", 0.85), w, h: hgt };
   }
 
   async function uploadToS3(target, file) {
@@ -636,12 +785,15 @@
     const notes = [];
     if (r.warning) notes.push(h("p", { class: "status error" }, r.warning));
     if (r.resized) notes.push(h("p", { class: "muted" }, "The two images had different dimensions, so image 2 was resized to match image 1."));
-    container.replaceChildren(dl, ...notes);
+    const pdfBtn = h("button", { type: "button" }, "Download PDF report");
+    pdfBtn.addEventListener("click", () => run(pdfBtn, () => makePdf(r.id)));
+    container.replaceChildren(dl, ...notes, h("p", {}, pdfBtn));
   }
 
   function clearPreviews() {
     state.previews.forEach((u) => URL.revokeObjectURL(u));
     state.previews = [];
+    Capture.stopAll(); // release the camera whenever the screen changes
   }
 
   Auth.restore().then((who) => (who ? enter(who.email) : renderLogin())).catch(() => renderLogin());
